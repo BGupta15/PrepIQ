@@ -36,7 +36,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ onLogout }: AppSidebarProps) {
-  const { state } = useSidebar();
+  const { state, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
 
@@ -64,6 +64,7 @@ export function AppSidebar({ onLogout }: AppSidebarProps) {
                     <NavLink
                       to={item.url}
                       end
+                      onClick={() => setOpenMobile(false)}
                       className="hover:bg-sidebar-accent/50 transition-colors"
                       activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
                     >
