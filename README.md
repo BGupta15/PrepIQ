@@ -99,21 +99,33 @@ cd prepiq
 
 ### 2. Environment setup
 
+Copy the example environment file:
+
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your values. For local development with SQLite:
+Open `.env` and update the values for your local setup.
+
+For simple local development, you can use SQLite instead of PostgreSQL:
 
 ```env
 DATABASE_URL=sqlite:///./backend/local.db
 APP_SECRET=any-long-random-string-only-for-local-dev
 ```
 
-> ⚠️ **Never commit a real `APP_SECRET`.** It signs all auth tokens — treat it like a password.
->
-> Leave `VITE_API_BASE_URL` blank for local development. The Vite dev server proxies `/api` to `localhost:8000` automatically. Only set it when deploying the frontend to a separate host (e.g. Vercel pointing at Render).
+> ⚠️ Never commit a real `APP_SECRET`.
+> It signs authentication tokens, so treat it like a password.
 
+For local frontend development, keep `VITE_API_BASE_URL` blank:
+
+```env
+VITE_API_BASE_URL=
+```
+
+The Vite dev server automatically proxies `/api` requests to `localhost:8000`.
+
+Only set `VITE_API_BASE_URL` when the frontend is deployed separately, such as a Vercel frontend pointing to a Render backend URL.
 ### 3. Install dependencies
 
 ```bash
@@ -155,17 +167,17 @@ docker compose up --build
 ## 🔑 Environment Variables
 
 | Variable | Description | Required |
-|----------|-------------|----------|
-| `DATABASE_URL` | SQLAlchemy connection string | ✅ |
-| `APP_SECRET` | Long random secret for signing auth tokens — **never commit a real value** | ✅ |
-| `CORS_ORIGINS` | Comma-separated allowed frontend origins | ✅ |
-| `ACCESS_TOKEN_TTL_HOURS` | Token expiry in hours (default: `168`) | ❌ |
-| `OPENROUTER_API_KEY` | OpenRouter API key — leave blank to use the built-in mock fallback | ❌ |
-| `OPENROUTER_MODEL` | Model name (default: `openrouter/free`) | ❌ |
-| `OPENROUTER_APP_NAME` | App label shown on your OpenRouter dashboard | ❌ |
-| `OPENROUTER_TIMEOUT_SECONDS` | Request timeout in seconds (default: `30`) | ❌ |
-| `VITE_API_BASE_URL` | Backend URL for deployed frontend — **leave blank for local dev** | ❌ |
-
+|---|---|---|
+| `DATABASE_URL` | Database connection string used by the backend. Use PostgreSQL for Docker/production or SQLite for simple local development. | ✅ |
+| `APP_SECRET` | Long random secret used for signing authentication tokens. Never commit a real value. | ✅ |
+| `CORS_ORIGINS` | Comma-separated list of frontend URLs allowed to access the backend API. | ✅ |
+| `ACCESS_TOKEN_TTL_HOURS` | Token expiry time in hours. Default value is `168`. | ❌ |
+| `OPENROUTER_API_KEY` | OpenRouter API key. Leave blank to use the built-in mock fallback. | ❌ |
+| `OPENROUTER_MODEL` | OpenRouter model name. Default value is `openrouter/free`. | ❌ |
+| `OPENROUTER_APP_URL` | App URL sent to OpenRouter. | ❌ |
+| `OPENROUTER_APP_NAME` | App name shown in OpenRouter. | ❌ |
+| `OPENROUTER_TIMEOUT_SECONDS` | OpenRouter request timeout in seconds. Default value is `30`. | ❌ |
+| `VITE_API_BASE_URL` | Backend API URL for deployed frontend builds. Leave blank for local development. | ❌ |
 ---
 
 ## 📡 API Endpoints
