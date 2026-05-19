@@ -7,7 +7,11 @@ import {
   TrendingUp,
   LogOut,
   Sparkles,
+  Sun,
+  Moon,
+  SunMoon,
 } from "lucide-react";
+import { useTheme } from "next-themes";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import {
@@ -37,6 +41,26 @@ interface AppSidebarProps {
 
 export function AppSidebar({ onLogout }: AppSidebarProps) {
   const { state, setOpenMobile } = useSidebar();
+  const { theme, setTheme } = useTheme();
+
+  const toggleTheme = () => {
+    const order = ["light", "dark", "system"] as const;
+    const currentIndex = order.indexOf(theme as "light" | "dark" | "system");
+    const nextIndex = (currentIndex + 1) % order.length;
+    setTheme(order[nextIndex]);
+  };
+
+  const themeIcon = {
+    light: <Sun className="mr-2 h-4 w-4 shrink-0" />,
+    dark: <Moon className="mr-2 h-4 w-4 shrink-0" />,
+    system: <SunMoon className="mr-2 h-4 w-4 shrink-0" />,
+  }[theme === "dark" ? "dark" : theme === "light" ? "light" : "system"];
+
+  const themeLabel = {
+    light: "Light",
+    dark: "Dark",
+    system: "System",
+  }[theme === "dark" ? "dark" : theme === "light" ? "light" : "system"];
   const collapsed = state === "collapsed";
   const location = useLocation();
 
@@ -83,6 +107,18 @@ export function AppSidebar({ onLogout }: AppSidebarProps) {
 
       <SidebarFooter className="border-t border-border p-2">
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              onClick={toggleTheme}
+              className="hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors"
+              tooltip={themeLabel}
+              aria-label="Toggle theme"
+            >
+              {themeIcon}
+              {!collapsed && <span>{themeLabel}</span>}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={onLogout}
