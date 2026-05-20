@@ -124,56 +124,61 @@ export default function JobTrackerPage({ jobs, onAddJob, onUpdateJob }: JobTrack
 
   return (
     <div className="space-y-6 animate-slide-up">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Job Tracker</h1>
-          <p className="text-sm text-muted-foreground">Track and manage your applications</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex bg-secondary rounded-lg p-0.5">
-            <button onClick={() => setView("kanban")} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === "kanban" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button onClick={() => setView("table")} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === "table" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
-              <TableIcon className="w-4 h-4" />
-            </button>
+      <div className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60 border-b border-border/40 pb-4 pt-2 space-y-6">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Job Tracker</h1>
+            <p className="text-sm text-muted-foreground">
+              Track and manage your applications
+            </p>
           </div>
-          <Dialog open={showAdd} onOpenChange={setShowAdd}>
-            <DialogTrigger asChild>
-              <Button className="gradient-primary text-primary-foreground">
-                <Plus className="w-4 h-4 mr-2" /> Add Application
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="bg-card border-border">
-              <DialogHeader>
-                <DialogTitle>Add Job Application</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 mt-2">
-                <div>
-                  <Label>Company</Label>
-                  <Input value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} className="mt-1 bg-secondary/50" />
+
+          <div className="flex items-center gap-2">
+            <div className="flex bg-secondary rounded-lg p-0.5">
+              <button onClick={() => setView("kanban")} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === "kanban" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <button onClick={() => setView("table")} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === "table" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+                <TableIcon className="w-4 h-4" />
+              </button>
+            </div>
+            <Dialog open={showAdd} onOpenChange={setShowAdd}>
+              <DialogTrigger asChild>
+                <Button className="gradient-primary text-primary-foreground">
+                  <Plus className="w-4 h-4 mr-2" /> Add Application
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="bg-card border-border">
+                <DialogHeader>
+                  <DialogTitle>Add Job Application</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 mt-2">
+                  <div>
+                    <Label>Company</Label>
+                    <Input value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} className="mt-1 bg-secondary/50" />
+                  </div>
+                  <div>
+                    <Label>Job Title</Label>
+                    <Input value={form.jobTitle} onChange={(e) => setForm({ ...form, jobTitle: e.target.value })} className="mt-1 bg-secondary/50" />
+                  </div>
+                  <div>
+                    <Label>Job URL</Label>
+                    <Input value={form.jobUrl} onChange={(e) => setForm({ ...form, jobUrl: e.target.value })} className="mt-1 bg-secondary/50" />
+                  </div>
+                  <div>
+                    <Label>Status</Label>
+                    <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as Status })}>
+                      <SelectTrigger className="mt-1 bg-secondary/50"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button onClick={handleAdd} className="w-full gradient-primary text-primary-foreground">Add Application</Button>
                 </div>
-                <div>
-                  <Label>Job Title</Label>
-                  <Input value={form.jobTitle} onChange={(e) => setForm({ ...form, jobTitle: e.target.value })} className="mt-1 bg-secondary/50" />
-                </div>
-                <div>
-                  <Label>Job URL</Label>
-                  <Input value={form.jobUrl} onChange={(e) => setForm({ ...form, jobUrl: e.target.value })} className="mt-1 bg-secondary/50" />
-                </div>
-                <div>
-                  <Label>Status</Label>
-                  <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as Status })}>
-                    <SelectTrigger className="mt-1 bg-secondary/50"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button onClick={handleAdd} className="w-full gradient-primary text-primary-foreground">Add Application</Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
       </div>
 
@@ -250,16 +255,16 @@ export default function JobTrackerPage({ jobs, onAddJob, onUpdateJob }: JobTrack
       </Sheet>
 
       {view === "kanban" && (
-        <div className="flex gap-4 overflow-x-auto pb-4">
+        <div className="flex gap-4 overflow-x-auto pb-4 max-h-[calc(100vh-320px)] [scrollbar-width:thin] [scrollbar-color:hsl(var(--primary))_transparent] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-secondary/30 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/70 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-primary">
           {kanbanColumns.map((status) => {
             const colJobs = jobs.filter((j) => j.status === status);
             return (
-              <div key={status} className="min-w-[260px] flex-shrink-0">
+              <div key={status} className="min-w-[260px] flex-shrink-0 flex flex-col max-h-full">
                 <div className="flex items-center gap-2 mb-3">
                   <Badge className={statusColor[status]}>{status}</Badge>
                   <span className="text-xs text-muted-foreground">{colJobs.length}</span>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 overflow-y-auto pr-1 max-h-[calc(100vh-320px)] [scrollbar-width:thin] [scrollbar-color:hsl(var(--primary))_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-secondary/30 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/70 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-primary">
                   {colJobs.map((job) => (
                     <div
                       key={job.id}
@@ -293,9 +298,9 @@ export default function JobTrackerPage({ jobs, onAddJob, onUpdateJob }: JobTrack
 
       {view === "table" && (
         <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-card">
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-320px)] [scrollbar-width:thin] [scrollbar-color:hsl(var(--primary))_transparent] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-secondary/30 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-primary/70 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-primary">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b border-border bg-secondary/30">
                   <th className="text-left py-3 px-4 text-muted-foreground font-medium">Company</th>
                   <th className="text-left py-3 px-4 text-muted-foreground font-medium">Role</th>
