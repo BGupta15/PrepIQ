@@ -74,9 +74,8 @@ function SortableCard({ job, onClick, isOverdue }: { job: JobApplication; onClic
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className={`rounded-xl bg-card border p-3 cursor-pointer hover:border-primary/30 transition-all ${
-        isOverdue ? "border-destructive/50 shadow-[0_0_10px_-3px_hsl(var(--destructive)/0.4)]" : "border-border"
-      } ${isDragging ? "opacity-50 scale-105 shadow-2xl z-50 relative" : ""}`}
+      className={`rounded-xl bg-card border p-3 cursor-pointer hover:border-primary/30 transition-all ${isOverdue ? "border-destructive/50 shadow-[0_0_10px_-3px_hsl(var(--destructive)/0.4)]" : "border-border"
+        } ${isDragging ? "opacity-50 scale-105 shadow-2xl z-50 relative" : ""}`}
     >
       <div className="flex items-center gap-2 mb-1">
         <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-xs font-bold text-muted-foreground">
@@ -114,6 +113,20 @@ export default function JobTrackerPage({ jobs, onAddJob, onUpdateJob }: JobTrack
   const [localJobs, setLocalJobs] = useState<JobApplication[]>(jobs);
   const localJobsRef = useRef(jobs);
   const [activeJob, setActiveJob] = useState<JobApplication | null>(null);
+
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    checkMobile();
+
+    window.addEventListener("resize", checkMobile);
+
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   useEffect(() => {
     setLocalJobs(jobs);
@@ -318,7 +331,39 @@ export default function JobTrackerPage({ jobs, onAddJob, onUpdateJob }: JobTrack
                   <Plus className="w-4 h-4 mr-2" /> Add Application
                 </Button>
               </DialogTrigger>
-              <DialogContent className="bg-card border-border">
+              <DialogContent
+                className={
+                  isMobile
+                    ? `
+                      fixed
+                      inset-x-0
+                      bottom-0
+                      top-auto
+                      z-50
+                      w-full
+                      max-w-none
+                      rounded-t-3xl
+                      rounded-b-none
+                      border-border
+                      bg-card
+                      p-6
+                      max-h-[90vh]
+                      overflow-y-auto
+
+                      data-[state=open]:animate-in
+                      data-[state=closed]:animate-out
+                      data-[state=open]:slide-in-from-bottom
+                      data-[state=closed]:slide-out-to-bottom
+                      data-[state=open]:duration-300
+                      data-[state=closed]:duration-200
+                      !left-0 !top-auto !translate-x-0 !translate-y-0
+
+                      translate-x-0
+                      translate-y-0
+                    `
+                    : "bg-card border-border sm:max-w-lg rounded-2xl"
+                }
+              >
                 <DialogHeader>
                   <DialogTitle>Add Job Application</DialogTitle>
                 </DialogHeader>
@@ -373,7 +418,15 @@ export default function JobTrackerPage({ jobs, onAddJob, onUpdateJob }: JobTrack
 
       <Sheet open={!!selectedJob} onOpenChange={(open) => !open && setSelectedJob(null)}>
         {/* ... Sheet Content ... */}
-        <SheetContent className="bg-card border-border w-full sm:max-w-lg overflow-y-auto">
+        <SheetContent
+          side={isMobile ? "bottom" : "right"}
+          className={`
+    bg-card border-border overflow-y-auto
+    ${isMobile
+              ? "h-[90vh] rounded-t-3xl border-t"
+              : "w-full sm:max-w-lg"}
+  `}
+        >
           <SheetHeader>
             <SheetTitle>{selectedJob?.companyName} — {selectedJob?.jobTitle}</SheetTitle>
           </SheetHeader>
