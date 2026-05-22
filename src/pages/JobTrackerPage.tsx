@@ -100,7 +100,7 @@ interface JobTrackerPageProps {
   userId: string;
 }
 
-export default function JobTrackerPage({ jobs, onAddJob, onUpdateJob }: JobTrackerPageProps) {
+export default function JobTrackerPage({ jobs, sessions, onAddJob, onUpdateJob }: JobTrackerPageProps) {
   const [view, setView] = useState<"kanban" | "table">("kanban");
   const [showAdd, setShowAdd] = useState(false);
   const [selectedJob, setSelectedJob] = useState<JobApplication | null>(null);
@@ -460,6 +460,25 @@ export default function JobTrackerPage({ jobs, onAddJob, onUpdateJob }: JobTrack
               <div>
                 <Label>Next Action Date</Label>
                 <Input type="date" value={draftJob.nextActionDate} onChange={(e) => setDraftJob({ ...draftJob, nextActionDate: e.target.value })} className="mt-1 bg-secondary/50" />
+              </div>
+              <div>
+                <Label>Linked Prep Session</Label>
+                <Select
+                  value={draftJob.linkedPrepSessionId || "none"}
+                  onValueChange={(v) => setDraftJob({ ...draftJob, linkedPrepSessionId: v === "none" ? null : v })}
+                >
+                  <SelectTrigger className="mt-1 bg-secondary/50">
+                    <SelectValue placeholder="Select a prep session" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None / No Prep Session</SelectItem>
+                    {sessions?.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.company} — {s.jobTitle}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <Label>Notes</Label>
