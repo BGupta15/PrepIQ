@@ -85,8 +85,10 @@ class PrepIQApiTestCase(unittest.TestCase):
         from backend.app import ml
 
         ml._spacy_nlp = False
+        _, headers = self.create_account()
         response = self.client.post(
             "/api/ml/extract-skills",
+            headers=headers,
             json={"text": "Built Python and React applications with PostgreSQL."},
         )
 
@@ -100,9 +102,11 @@ class PrepIQApiTestCase(unittest.TestCase):
         from backend.app import ml
 
         ml._spacy_nlp = False
+        _, headers = self.create_account()
 
         response = self.client.post(
             "/api/ml/extract-skills",
+            headers=headers,
             json={
                 "text": """
                 Worked on machine-learning, spring_boot,
@@ -125,8 +129,10 @@ class PrepIQApiTestCase(unittest.TestCase):
         self.assertIn("JWT", skills)
 
     def test_match_score_endpoint_returns_score_and_label(self) -> None:
+        _, headers = self.create_account()
         response = self.client.post(
             "/api/ml/match-score",
+            headers=headers,
             json={
                 "resumeText": "Python developer with FastAPI, SQL, and machine learning experience.",
                 "jdText": "Looking for a Python engineer with FastAPI and SQL skills.",
@@ -141,8 +147,10 @@ class PrepIQApiTestCase(unittest.TestCase):
         self.assertIn(payload["label"], {"Strong match", "Moderate match", "Weak match"})
 
     def test_analyze_confidence_endpoint_returns_analysis_shape(self) -> None:
+        _, headers = self.create_account()
         response = self.client.post(
             "/api/ml/analyze-confidence",
+            headers=headers,
             json={
                 "text": "I led a team of 4 engineers and improved deployment speed by 30 percent.",
             },
@@ -155,6 +163,23 @@ class PrepIQApiTestCase(unittest.TestCase):
         self.assertIsInstance(payload["wordCount"], int)
         self.assertIn(payload["sentiment"], {"positive", "neutral", "negative"})
         self.assertGreater(payload["wordCount"], 0)
+
+    def test_ml_endpoints_require_auth(self) -> None:
+        response = self.client.post(
+            "/api/ml/extract-skills",
+            json={"text": "test"},
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_ml_endpoints_payload_size_limit(self) -> None:
+        _, headers = self.create_account()
+        large_text = "a" * 11000
+        response = self.client.post(
+            "/api/ml/extract-skills",
+            headers=headers,
+            json={"text": large_text},
+        )
+        self.assertEqual(response.status_code, 413)
 
     def test_signup_login_and_me(self) -> None:
         email = f"login-{uuid4().hex[:8]}@example.com"

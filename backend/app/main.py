@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, create_engine, delete, func, select
@@ -717,7 +717,7 @@ def evaluate_mock_attempt(question: str, answer: str) -> tuple[int, MockFeedback
 
 
 def require_current_user(
-    user_id: str,
+    user_id: str | None = None,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> UserTable:
@@ -726,13 +726,20 @@ def require_current_user(
 
     payload = decode_token(authorization.removeprefix("Bearer ").strip())
     token_user_id = payload.get("sub")
-    if token_user_id != user_id:
+    if user_id is not None and token_user_id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    user = db.get(UserTable, user_id)
+    user = db.get(UserTable, token_user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
+
+
+def validate_payload_size(request: Request) -> None:
+    if "content-length" in request.headers:
+        length = int(request.headers["content-length"])
+        if length > 10240:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Request entity too large")
 
 
 app = FastAPI(title="PrepIQ Backend", version="2.0.0")
@@ -1121,20 +1128,20 @@ class ConfidenceRequest(BaseModel):
     text: str
 
 
-@app.post("/api/ml/extract-skills", response_model=ExtractSkillsResponse)
+@app.post("/api/ml/extract-skills", response_model=ExtractSkillsResponse, dependencies=[Depends(require_current_user), Depends(validate_payload_size)])
 def ml_extract_skills(payload: ExtractSkillsRequest) -> ExtractSkillsResponse:
     skills = extract_skills(payload.text)
     return ExtractSkillsResponse(skills=skills, count=len(skills))
 
 
-@app.post("/api/ml/match-score", response_model=MatchScoreResponse)
+@app.post("/api/ml/match-score", response_model=MatchScoreResponse, dependencies=[Depends(require_current_user), Depends(validate_payload_size)])
 def ml_match_score(payload: MatchScoreRequest) -> MatchScoreResponse:
     score = compute_match_score(payload.resumeText, payload.jdText)
     label = "Strong match" if score >= 70 else "Moderate match" if score >= 50 else "Weak match"
     return MatchScoreResponse(score=score, label=label)
 
 
-@app.post("/api/ml/analyze-confidence", response_model=ConfidenceAnalysis)
+@app.post("/api/ml/analyze-confidence", response_model=ConfidenceAnalysis, dependencies=[Depends(require_current_user), Depends(validate_payload_size)])
 def ml_analyze_confidence(payload: ConfidenceRequest) -> ConfidenceAnalysis:
     result = analyze_confidence(payload.text)
     return ConfidenceAnalysis(**result)
