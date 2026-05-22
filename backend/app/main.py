@@ -11,7 +11,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrllibRequest, urlopen
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
@@ -499,7 +499,7 @@ def call_openrouter_json(system_prompt: str, user_prompt: str) -> dict[str, Any]
             {"role": "user", "content": user_prompt},
         ],
     }
-    request = Request(
+    request = UrllibRequest(
         "https://openrouter.ai/api/v1/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
         headers={
