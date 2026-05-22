@@ -19,7 +19,7 @@ select = [
     "UP",   # pyupgrade (modern Python syntax)
 ]
 
-ignore = []
+ignore = ["E501"]  # Line length enforced by formatter, not linter
 
 [tool.ruff.lint.isort]
 # Sort imports automatically according to isort standards
