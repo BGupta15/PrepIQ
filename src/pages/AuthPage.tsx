@@ -304,7 +304,7 @@ export default function AuthPage({ mode, onLogin, onSignup }: AuthPageProps) {
                   </div>
 
                   {/* Password */}
-                  <div>
+                 <div>
                     <Label htmlFor="password">Password</Label>
 
                     <div className="relative mt-1">
@@ -322,18 +322,121 @@ export default function AuthPage({ mode, onLogin, onSignup }: AuthPageProps) {
                         type="button"
                         onClick={() => setShowPassword((prev) => !prev)}
                         aria-label={
-                          showPassword ? "Hide password" : "Show password"
+                        showPassword ? "Hide password" : "Show password"
                         }
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                       >
-                        {showPassword ? (
-                          <EyeOff className="w-4 h-4" />
-                        ) : (
-                          <Eye className="w-4 h-4" />
-                        )}
-                      </button>
+                       {showPassword ? (
+                            <EyeOff className="w-4 h-4" />
+                          ) : (
+                            <Eye className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+
+                      {/* SHOW ONLY IN SIGN UP */}
+                      {mode === 'signup' && password && (
+                        <div className="mt-3 space-y-2">
+                          {(() => {
+                            let score = 0;
+
+                            if (password.length >= 8) score++;
+                            if (/[A-Z]/.test(password)) score++;
+                            if (/[a-z]/.test(password)) score++;
+                            if (/[0-9]/.test(password)) score++;
+                            if (/[^A-Za-z0-9]/.test(password)) score++;
+
+                            const strength =
+                              score <= 2
+                                ? {
+                                    label: "Weak",                                  
+                                  }
+                                : score <= 4
+                                ? {
+                                    label: "Medium",
+                                  }
+                                : {
+                                    label: "Strong",
+                                  };
+
+                            return (
+                              <>
+                                {/* Strength Header */}
+                                <div className="flex justify-between text-xs">
+                                  <span className="text-muted-foreground">
+                                    Password Strength
+                                  </span>
+
+                                  <span
+                                    className={`font-medium ${
+                                      strength.label === "Weak"
+                                        ? "text-red-500"
+                                        : strength.label === "Medium"
+                                        ? "text-yellow-500"
+                                        : "text-green-500"
+                                    }`}
+                                  >
+                                    {strength.label}
+                                  </span>
+                                </div>
+
+                                <div className="space-y-1 text-xs">
+                                  <p
+                                    className={
+                                      password.length >= 8
+                                        ? "text-green-500"
+                                        : "text-muted-foreground"
+                                    }
+                                  >
+                                    ✓ At least 8 characters
+                                  </p>
+
+                                  <p
+                                    className={
+                                      /[A-Z]/.test(password)
+                                        ? "text-green-500"
+                                        : "text-muted-foreground"
+                                    }
+                                  >
+                                    ✓ One uppercase letter
+                                  </p>
+
+                                  <p
+                                    className={
+                                      /[a-z]/.test(password)
+                                        ? "text-green-500"
+                                        : "text-muted-foreground"
+                                    }
+                                  >
+                                    ✓ One lowercase letter
+                                  </p>
+
+                                  <p
+                                    className={
+                                      /[0-9]/.test(password)
+                                        ? "text-green-500"
+                                        : "text-muted-foreground"
+                                    }
+                                  >
+                                    ✓ One number
+                                  </p>
+
+                                  <p
+                                    className={
+                                      /[^A-Za-z0-9]/.test(password)
+                                        ? "text-green-500"
+                                        : "text-muted-foreground"
+                                    }
+                                  >
+                                    ✓ One special character
+                                  </p>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
                     </div>
-                  </div>
 
                   {/* Confirm Password */}
                   {mode === "signup" && (
