@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
+from fastapi.testclient import TestClient
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEST_DB_PATH = REPO_ROOT / "backend" / "test-ci.db"
@@ -13,9 +14,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH.as_posix()}"
 os.environ["APP_SECRET"] = "ci-test-secret"
 os.environ["CORS_ORIGINS"] = "http://localhost:8080,http://127.0.0.1:8080"
 
-from fastapi.testclient import TestClient
-
-from backend.app.main import app
+from backend.app import ml  # noqa: E402
+from backend.app.main import app  # noqa: E402
 
 
 class PrepIQApiTestCase(unittest.TestCase):
@@ -46,9 +46,7 @@ class PrepIQApiTestCase(unittest.TestCase):
         self.assertEqual(response.json(), {"status": "ok"})
 
     def test_extract_skills_endpoint_returns_skill_list(self) -> None:
-        from backend.app import ml
-
-        ml._spacy_nlp = False
+        ml._spacy_cache.clear()
         response = self.client.post(
             "/api/ml/extract-skills",
             json={"text": "Built Python and React applications with PostgreSQL."},

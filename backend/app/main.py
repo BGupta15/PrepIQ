@@ -462,7 +462,7 @@ def stable_number(seed: str, minimum: int, maximum: int) -> int:
     return minimum + (int(digest[:8], 16) % span)
 
 
-def call_openrouter_json(system_prompt: str, user_prompt: str) -> dict[str, Any]:
+async def call_openrouter_json(system_prompt: str, user_prompt: str) -> dict[str, Any]:
     if not OPENROUTER_API_KEY:
         raise OpenRouterError("OpenRouter is not configured")
 
@@ -475,8 +475,8 @@ def call_openrouter_json(system_prompt: str, user_prompt: str) -> dict[str, Any]
         ],
     }
     try:
-        with httpx.Client(timeout=OPENROUTER_TIMEOUT_SECONDS) as client:
-            response = client.post(
+        async with httpx.AsyncClient(timeout=OPENROUTER_TIMEOUT_SECONDS) as client:
+            response = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 json=payload,
                 headers={
@@ -499,9 +499,9 @@ def call_openrouter_json(system_prompt: str, user_prompt: str) -> dict[str, Any]
         raise OpenRouterError("OpenRouter returned an invalid response format") from exc
 
 
-def generate_session_payload(job_title: str, company: str, jd_text: str, resume_text: str) -> SessionPayload:
+async def generate_session_payload(job_title: str, company: str, jd_text: str, resume_text: str) -> SessionPayload:
     try:
-        response = call_openrouter_json(
+        response = await call_openrouter_json(
             system_prompt=(
                 "You generate structured interview preparation data. "
                 "Return valid JSON only. Do not include markdown or explanations. "
@@ -558,12 +558,12 @@ def generate_session_payload(job_title: str, company: str, jd_text: str, resume_
     return SessionPayload(gap_analysis, readiness, question_bank, roadmap)
 
 
-def evaluate_mock_attempt(question: str, answer: str) -> MockResult:
+async def evaluate_mock_attempt(question: str, answer: str) -> MockResult:
     # --- ML: always analyze confidence regardless of OpenRouter outcome ---
     confidence = ConfidenceAnalysis(**analyze_confidence(answer))
 
     try:
-        response = call_openrouter_json(
+        response = await call_openrouter_json(
             system_prompt=(
                 "You evaluate interview answers. "
                 "Return valid JSON only. Do not include markdown or explanations. "
@@ -785,13 +785,13 @@ def get_session(user_id: str, session_id: str, _: UserTable = Depends(require_cu
 
 
 @app.post("/api/users/{user_id}/sessions", response_model=InterviewSession, status_code=status.HTTP_201_CREATED)
-def create_session(
+async def create_session(
     user_id: str,
     payload: CreateInterviewSessionRequest,
     _: UserTable = Depends(require_current_user),
     db: Session = Depends(get_db),
 ) -> InterviewSession:
-    session_data = generate_session_payload(payload.jobTitle, payload.company, payload.jdText, payload.resumeText)
+    session_data = await generate_session_payload(payload.jobTitle, payload.company, payload.jdText, payload.resumeText)
 
     # --- ML: extract skills from resume ---
     skills = extract_skills(payload.resumeText)
@@ -849,7 +849,7 @@ def get_mock_attempts(user_id: str, _: UserTable = Depends(require_current_user)
 
 
 @app.post("/api/users/{user_id}/mocks", response_model=MockAttempt, status_code=status.HTTP_201_CREATED)
-def create_mock_attempt(
+async def create_mock_attempt(
     user_id: str,
     payload: CreateMockAttemptRequest,
     _: UserTable = Depends(require_current_user),
@@ -859,7 +859,7 @@ def create_mock_attempt(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Question must not be empty")
     if not payload.userAnswer.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Answer must not be empty")
-    result = evaluate_mock_attempt(payload.question, payload.userAnswer)
+    result = await evaluate_mock_attempt(payload.question, payload.userAnswer)
     row = MockAttemptTable(
         id=str(uuid4()),
         session_id=payload.sessionId,
@@ -996,7 +996,7 @@ class GenerateQuestionResponse(BaseModel):
 
 
 @app.post("/api/users/{user_id}/mock/generate-question", response_model=GenerateQuestionResponse)
-def generate_mock_question(
+async def generate_mock_question(
     user_id: str,
     payload: GenerateQuestionRequest,
     _: UserTable = Depends(require_current_user),
@@ -1013,7 +1013,7 @@ def generate_mock_question(
         )
 
     try:
-        response = call_openrouter_json(
+        response = await call_openrouter_json(
             system_prompt=(
                 "You generate realistic technical and behavioral interview questions. "
                 "Return valid JSON only. Do not include markdown or explanations. "
