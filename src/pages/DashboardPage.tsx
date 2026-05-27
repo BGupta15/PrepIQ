@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -8,6 +9,9 @@ import {
   TrendingUp,
   ArrowRight,
   Plus,
+  CheckCircle2,
+  Circle,
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,10 +29,31 @@ interface DashboardPageProps {
 export default function DashboardPage({ user, profile, sessions, mocks, jobs }: DashboardPageProps) {
   const navigate = useNavigate();
 
+  const [isDismissed, setIsDismissed] = useState(() => {
+    return localStorage.getItem("onboardingDismissed") === "true";
+  });
+
+  const dismissOnboarding = () => {
+    setIsDismissed(true);
+    localStorage.setItem("onboardingDismissed", "true");
+  };
+
   const completionPercent = profile?.onboardingComplete ? 100 : 0;
   const avgScore = mocks.length
     ? Math.round(mocks.reduce((s, m) => s + m.aiScore, 0) / mocks.length)
     : 0;
+
+  const steps = [
+    { id: 1, title: "Create your account", completed: true },
+    { id: 2, title: "Complete Career DNA profile", completed: !!profile?.onboardingComplete },
+    { id: 3, title: "Add your first job application", completed: jobs.length > 0 },
+    { id: 4, title: "Create your first prep session", completed: sessions.length > 0 },
+    { id: 5, title: "Complete your first mock interview", completed: mocks.length > 0 },
+  ];
+
+  const completedSteps = steps.filter((s) => s.completed).length;
+  const onboardingProgress = (completedSteps / steps.length) * 100;
+  const showOnboarding = !isDismissed && completedSteps < steps.length;
 
   const recentSessions = sessions.slice(-3).reverse();
   const recentJobs = jobs.slice(-3).reverse();
@@ -62,6 +87,59 @@ export default function DashboardPage({ user, profile, sessions, mocks, jobs }: 
           </div>
         </div>
       </motion.div>
+
+      {/* Onboarding Checklist */}
+      {showOnboarding && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl bg-card border border-border p-6 shadow-card relative"
+        >
+          <button
+            onClick={dismissOnboarding}
+            className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-secondary text-muted-foreground transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+          
+          <div className="mb-4 pr-8">
+            <h2 className="text-lg font-bold text-foreground">Getting Started</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Complete these steps to get the most out of PrepIQ.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 mb-6">
+            <div className="flex-1 h-2 bg-secondary rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-primary transition-all duration-1000 ease-out"
+                style={{ width: `${onboardingProgress}%` }}
+              />
+            </div>
+            <span className="text-sm font-medium text-foreground min-w-[40px]">
+              {completedSteps}/{steps.length}
+            </span>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-3">
+            {steps.map((step) => (
+              <div 
+                key={step.id} 
+                className={`flex items-center gap-3 p-3 rounded-xl border ${step.completed ? 'bg-primary/5 border-primary/20' : 'bg-secondary/30 border-border'}`}
+              >
+                {step.completed ? (
+                  <CheckCircle2 className="w-5 h-5 text-primary shrink-0" />
+                ) : (
+                  <Circle className="w-5 h-5 text-muted-foreground shrink-0" />
+                )}
+                <span className={`text-sm font-medium ${step.completed ? 'text-foreground' : 'text-muted-foreground'}`}>
+                  {step.title}
+                </span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       {/* Career DNA Card */}
       {completionPercent < 100 && (
