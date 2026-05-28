@@ -140,6 +140,7 @@ class InterviewSessionTable(Base):
     company: Mapped[str] = mapped_column(String(255))
     jd_text: Mapped[str] = mapped_column(Text)
     resume_text: Mapped[str] = mapped_column(Text)
+    is_estimated: Mapped[bool] = mapped_column(Boolean, default=False)
     gap_analysis: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     readiness_score: Mapped[int] = mapped_column(Integer)
     question_bank: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
@@ -340,6 +341,7 @@ class InterviewSession(BaseModel):
     company: str
     jdText: str
     resumeText: str
+    isEstimated: bool
     gapAnalysis: list[GapItem]
     readinessScore: int
     questionBank: list[QuestionItem]
@@ -485,6 +487,7 @@ def session_from_table(session: InterviewSessionTable) -> InterviewSession:
         company=session.company,
         jdText=session.jd_text,
         resumeText=session.resume_text,
+        isEstimated=session.is_estimated,
         gapAnalysis=session.gap_analysis,
         readinessScore=session.readiness_score,
         questionBank=session.question_bank,
@@ -731,7 +734,7 @@ async def generate_session_payload(
         roadmap = [RoadmapDay(**norm_dict(item, roadmap_mapping)) for item in raw_roadmap if isinstance(item, dict)]
 
         if len(roadmap) >= 1 and len(question_bank) >= 1 and len(gap_analysis) >= 1:
-            return gap_analysis, readiness, question_bank, roadmap
+            return gap_analysis, readiness, question_bank, roadmap, False
     except (OpenRouterError, KeyError, TypeError, ValueError) as exc:
         logger.warning(
             "Using fallback prep session payload because OpenRouter failed: %s", exc
@@ -834,7 +837,8 @@ async def generate_session_payload(
             ],
         ),
     ]
-    return gap_analysis, readiness, question_bank, roadmap
+    is_estimated = not resume_text.strip() and not jd_text.strip()
+    return gap_analysis, readiness, question_bank, roadmap, is_estimated
 
 
 def _significant_tokens(text: str) -> set[str]:
@@ -1281,7 +1285,7 @@ async def create_session(
     db: Session = Depends(get_db),
 ) -> InterviewSession:
     client = getattr(request.app.state, "httpx_client", None)
-    gap_analysis, readiness, question_bank, roadmap = await generate_session_payload(
+    gap_analysis, readiness, question_bank, roadmap, is_estimated = await generate_session_payload(
         payload.jobTitle,
         payload.company,
         payload.jdText,
@@ -1301,6 +1305,7 @@ async def create_session(
         company=payload.company,
         jd_text=payload.jdText,
         resume_text=payload.resumeText,
+        is_estimated=is_estimated,
         gap_analysis=[item.model_dump() for item in gap_analysis],
         readiness_score=readiness,
         question_bank=[item.model_dump() for item in question_bank],
