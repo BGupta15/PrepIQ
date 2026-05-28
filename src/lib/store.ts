@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, SESSION_KEY } from "@/lib/api";
 
 export interface User {
   id: string;
@@ -58,6 +58,7 @@ export interface InterviewSession {
   roadmap: RoadmapDay[];
   extractedSkills: string[];
   mlMatchScore: number;
+  isEstimated: boolean;
   createdAt: string;
 }
 
@@ -151,8 +152,6 @@ export interface CreateJobApplicationInput {
   jobUrl: string;
   status: JobApplication["status"];
 }
-
-const SESSION_KEY = "prepiq_session";
 
 function getSession(): AuthSession | null {
   try {
@@ -359,5 +358,9 @@ export function useJobApplications(userId: string | undefined) {
     return updated;
   }, [setJobs, userId]);
 
-  return { jobs, addJob, updateJob, jobsError, jobsLoading };
+  const deleteJob = useCallback((id: string) => {
+    setJobs((prev) => prev.filter((job) => job.id !== id));
+  }, [setJobs]);
+
+  return { jobs, addJob, updateJob, deleteJob, jobsError, jobsLoading };
 }

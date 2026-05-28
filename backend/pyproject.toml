@@ -1,0 +1,26 @@
+[tool.ruff]
+# Target Python version
+target-version = "py310"
+
+# Limit line length to 88 (Ruff default)
+line-length = 88
+
+
+# Source directories
+src = ["app"]
+
+[tool.ruff.lint]
+# Enable rules: Pyflakes (F), pycodestyle (E, W), isort (I), and pyupgrade (UP)
+select = [
+    "F",    # Pyflakes (includes unused imports F401)
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "I",    # isort (import sorting)
+    "UP",   # pyupgrade (modern Python syntax)
+]
+
+ignore = ["E501"]  # Line length enforced by formatter, not linter
+
+[tool.ruff.lint.isort]
+# Sort imports automatically according to isort standards
+combine-as-imports = true

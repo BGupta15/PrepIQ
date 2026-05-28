@@ -5,9 +5,19 @@ WORKDIR /app
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 RUN python -m spacy download en_core_web_sm
-RUN python -c "import textblob; textblob.download_corpora(lite=True)"
+RUN python -m textblob.download_corpora lite
 
 COPY backend /app/backend
+
+# Create a non-root user for running the application
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+
+# Python-based healthcheck (curl is not available in python:slim images)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
+
+# Switch to non-root user
+USER appuser
 
 EXPOSE 8000
 

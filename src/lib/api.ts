@@ -1,5 +1,5 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
-const SESSION_KEY = "prepiq_session";
+export const SESSION_KEY = "prepiq_session";
 
 interface SessionPayload {
   user: {
@@ -60,6 +60,28 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
 
   if (response.status === 204) {
     return undefined as T;
+  }
+
+  return response.json() as Promise<T>;
+}
+
+/** Upload a file via FormData — does NOT set Content-Type so the browser adds the multipart boundary. */
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {};
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseError(response));
   }
 
   return response.json() as Promise<T>;

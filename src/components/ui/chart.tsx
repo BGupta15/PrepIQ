@@ -58,6 +58,13 @@ const ChartContainer = React.forwardRef<
 });
 ChartContainer.displayName = "Chart";
 
+const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
+const SAFE_CSS_VALUE = /^[a-zA-Z0-9#(),%. /-]+$/;
+
+function safeCssPart(value: string, pattern: RegExp): string | null {
+  return pattern.test(value) ? value : null;
+}
+
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   const colorConfig = Object.entries(config).filter(([_, config]) => config.theme || config.color);
 
@@ -65,22 +72,25 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
+  const safeId = safeCssPart(id, SAFE_ID);
+  if (!safeId) return null;
+
   return (
     <style
       dangerouslySetInnerHTML={{
         __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
-  })
-  .join("\n")}
-}
-`,
-          )
+          .map(([theme, prefix]) => {
+            const declarations = colorConfig
+              .map(([key, itemConfig]) => {
+                const safeKey = safeCssPart(key, SAFE_ID);
+                const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
+                const safeColor = color ? safeCssPart(color, SAFE_CSS_VALUE) : null;
+                return safeKey && safeColor ? `  --color-${safeKey}: ${safeColor};` : null;
+              })
+              .filter(Boolean)
+              .join("\n");
+            return `\n${prefix} [data-chart=${safeId}] {\n${declarations}\n}\n`;
+          })
           .join("\n"),
       }}
     />

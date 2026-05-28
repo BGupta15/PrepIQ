@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -19,22 +20,41 @@ logger = logging.getLogger(__name__)
 # Lazy-loaded ML models (loaded once on first use)
 # ---------------------------------------------------------------------------
 
-_spacy_nlp = None
+_spacy_lock = threading.Lock()
+_spacy_cache: dict[str, object] = {}
 _tfidf_vectorizer = None
+_sentence_transformer_model = None
 
 
 def _get_spacy():
-    """Lazy-load spaCy model."""
-    global _spacy_nlp
-    if _spacy_nlp is None:
+    """Lazy-load spaCy model (thread-safe, no global mutation)."""
+    if "nlp" in _spacy_cache:
+        return _spacy_cache["nlp"]
+    with _spacy_lock:
+        if "nlp" not in _spacy_cache:
+            try:
+                import spacy
+                _spacy_cache["nlp"] = spacy.load("en_core_web_sm")
+                logger.info("spaCy model loaded successfully")
+            except OSError:
+                logger.warning("spaCy model 'en_core_web_sm' not found. Run: python -m spacy download en_core_web_sm")
+                _spacy_cache["nlp"] = None
+    return _spacy_cache["nlp"]
+
+
+def _get_sentence_transformer():
+    """Lazy-load sentence-transformers model."""
+    global _sentence_transformer_model
+    if _sentence_transformer_model is None:
         try:
-            import spacy
-            _spacy_nlp = spacy.load("en_core_web_sm")
-            logger.info("spaCy model loaded successfully")
-        except OSError:
-            logger.warning("spaCy model 'en_core_web_sm' not found. Run: python -m spacy download en_core_web_sm")
-            _spacy_nlp = False  # Mark as failed so we don't retry
-    return _spacy_nlp if _spacy_nlp is not False else None
+            from sentence_transformers import SentenceTransformer
+            # Load the lightweight, fast model recommended in the issue
+            _sentence_transformer_model = SentenceTransformer('all-MiniLM-L6-v2')
+            logger.info("sentence-transformers model 'all-MiniLM-L6-v2' loaded successfully")
+        except Exception as exc:
+            logger.warning("Failed to load sentence-transformers model: %s", exc)
+            _sentence_transformer_model = False
+    return _sentence_transformer_model if _sentence_transformer_model is not False else None
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +122,7 @@ def extract_skills(text: str) -> list[str]:
     normalized_text = re.sub(r'[-_/]', ' ', text_lower)
     normalized_text = re.sub(r'\s+', ' ', normalized_text).strip()
 
-    
+
     # Method 1: Keyword matching against curated skill list
     for skill in sorted(TECH_SKILLS, key=len, reverse=True):
         # Multi-word skills need safer boundary handling
@@ -120,7 +140,7 @@ def extract_skills(text: str) -> list[str]:
             found_skills.add(
                 skill.title() if len(skill) > 3 else skill.upper()
             )
-            
+
     # Method 2: spaCy NER to catch additional entities
     nlp = _get_spacy()
     if nlp:
@@ -143,15 +163,17 @@ def extract_skills(text: str) -> list[str]:
 # Feature 2: Resume ↔ JD Match Score
 # ---------------------------------------------------------------------------
 
-def compute_match_score(resume_text: str, jd_text: str) -> int:
+def compute_match_score(resume_text: str, jd_text: str) -> dict[str, int]:
     """
-    Compute similarity between resume and job description using TF-IDF + cosine similarity.
+    Compute similarity between resume and job description using semantic embeddings
+    and TF-IDF + cosine similarity as a fallback.
 
-    Returns an integer score from 0 to 100.
+    Returns a dict with semanticScore, keywordOverlapScore, and overallScore.
     """
     if not resume_text or not jd_text or not resume_text.strip() or not jd_text.strip():
-        return 50  # Default when either text is missing
+        return {"semanticScore": 0, "keywordOverlapScore": 0, "overallScore": 0}
 
+    keyword_score = 0
     try:
         from sklearn.feature_extraction.text import TfidfVectorizer
         from sklearn.metrics.pairwise import cosine_similarity
@@ -166,16 +188,35 @@ def compute_match_score(resume_text: str, jd_text: str) -> int:
         tfidf_matrix = vectorizer.fit_transform([resume_text, jd_text])
         similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
 
-        # Scale similarity (typically 0.0-0.5 range) to a more intuitive 0-100 score
-        # Apply a scaling curve: raw scores above 0.3 are strong matches
-        scaled = min(100, max(0, int(similarity * 200)))
-
-        # Clamp to a reasonable range (30-95) to avoid extremes
-        return max(30, min(95, scaled))
-
+        # Scale similarity to 0-100 score
+        keyword_score = min(100, max(0, int(similarity * 200)))
     except Exception as exc:
         logger.warning("TF-IDF match score failed: %s", exc)
-        return 50
+
+    semantic_score = 0
+    model = _get_sentence_transformer()
+    if model:
+        try:
+            from sklearn.metrics.pairwise import cosine_similarity
+
+            embeddings = model.encode([resume_text, jd_text])
+            sim = cosine_similarity(embeddings[0:1], embeddings[1:2])[0][0]
+
+            semantic_score = min(100, max(0, int(sim * 100)))
+        except Exception as exc:
+            logger.warning("Semantic match score failed: %s", exc)
+
+    # Calculate overall score, weighted towards semantic score if available
+    if model:
+        overall_score = int(0.7 * semantic_score + 0.3 * keyword_score)
+    else:
+        overall_score = keyword_score
+
+    return {
+        "semanticScore": semantic_score,
+        "keywordOverlapScore": keyword_score,
+        "overallScore": overall_score
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -208,12 +249,13 @@ def analyze_confidence(answer_text: str) -> dict[str, Any]:
 
     # --- Sentiment analysis with TextBlob ---
     polarity = 0.0
-    subjectivity = 0.5
+
     try:
         from textblob import TextBlob
+
         blob = TextBlob(answer_text)
         polarity = blob.sentiment.polarity        # -1.0 to 1.0
-        subjectivity = blob.sentiment.subjectivity  # 0.0 to 1.0
+
     except Exception as exc:
         logger.warning("TextBlob sentiment analysis failed: %s", exc)
 
@@ -225,7 +267,6 @@ def analyze_confidence(answer_text: str) -> dict[str, Any]:
     else:
         sentiment = "neutral"
 
-    # --- Specificity score ---
     # More numbers, percentages, and concrete metrics = more specific
     number_count = len(re.findall(r'\b\d+[\d,.]*%?\b', answer_text))
     metric_keywords = ["increased", "decreased", "improved", "reduced", "achieved",
