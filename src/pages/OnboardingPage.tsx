@@ -225,7 +225,7 @@ export default function OnboardingPage({ user, profile, onSave }: OnboardingPage
         if (dreamCompanies.length === 0)
           return "Add at least one dream company to continue.";
         return null;
-      case 1:
+      case 1: {
         if (!degree.trim())
           return "Please enter your degree.";
         if (!institution.trim())
@@ -237,6 +237,7 @@ export default function OnboardingPage({ user, profile, onSave }: OnboardingPage
           return "Please enter a valid graduation year between 1950 and 2030.";
 
         return null;
+      }
       case 2: {
         let filledCount = 0;
         const currentYear = new Date().getFullYear();
