@@ -70,6 +70,7 @@ export interface GapItem {
   have: string;
   need: string;
   gapLevel: "Low" | "Medium" | "High";
+  resources: string[];
 }
 
 export interface QuestionItem {
