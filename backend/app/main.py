@@ -25,6 +25,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     JSON,
@@ -1198,18 +1199,20 @@ async def evaluate_mock_attempt(
     )
 
 
+# Initialize HTTPBearer security scheme for Swagger UI
+security = HTTPBearer(
+    scheme_name="Bearer",
+    description="JWT Bearer token"
+)
+
+
 def require_current_user(
     user_id: str | None = None,
-    authorization: str | None = Header(default=None),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ) -> UserTable:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authorization token",
-        )
-
-    payload = decode_token(authorization.removeprefix("Bearer ").strip())
+    token = credentials.credentials
+    payload = decode_token(token)
     token_user_id = payload.get("sub")
     if user_id is not None and token_user_id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
