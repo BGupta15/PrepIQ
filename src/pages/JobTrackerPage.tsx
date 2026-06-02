@@ -16,6 +16,8 @@ import {
   ChevronRight,
   Search,
   X,
+  Check,
+  ChevronsUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -372,9 +374,23 @@ export default function JobTrackerPage({ jobs, sessions, onAddJob, onUpdateJob, 
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [form, setForm] = useState({ companyName: "", jobTitle: "", jobUrl: "", status: "Applied" as Status });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const filteredJobs = localJobs.filter((job) => {
+    const matchesSearch =
+      job.companyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      job.jobTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (job.location && job.location.toLowerCase().includes(searchQuery.toLowerCase()));
+    
+    const matchesStatus = statusFilter === "all" || job.status === statusFilter;
+    
+    return matchesSearch && matchesStatus;
+  });
 
   // Handle route state for auto-selection
   useEffect(() => {
@@ -675,6 +691,7 @@ export default function JobTrackerPage({ jobs, sessions, onAddJob, onUpdateJob, 
             </p>
           </div>
 
+<<<<<<< HEAD
           <div className="flex items-center gap-2 flex-wrap">
             {/* Search bar (issue #188) */}
             <div className="relative">
@@ -717,9 +734,38 @@ export default function JobTrackerPage({ jobs, sessions, onAddJob, onUpdateJob, 
             )}
             <div className="flex bg-secondary rounded-lg p-0.5">
               <button onClick={() => setView("kanban")} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === "kanban" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+=======
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative w-48 sm:w-64">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search jobs or companies..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 bg-secondary/50 border-border"
+              />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-32 h-9 bg-secondary/50 border-border">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                {STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <div className="flex bg-secondary rounded-lg p-0.5 h-9 items-center">
+              <button onClick={() => setView("kanban")} className={`px-3 py-1.5 rounded-md text-sm transition-colors h-8 ${view === "kanban" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+>>>>>>> e9fc0f7 (feat: add search & filter to Job Tracker and fresher onboarding toggle)
                 <LayoutGrid className="w-4 h-4" />
               </button>
-              <button onClick={() => setView("table")} className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === "table" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+              <button onClick={() => setView("table")} className={`px-3 py-1.5 rounded-md text-sm transition-colors h-8 ${view === "table" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
                 <TableIcon className="w-4 h-4" />
               </button>
             </div>
@@ -1090,7 +1136,11 @@ export default function JobTrackerPage({ jobs, sessions, onAddJob, onUpdateJob, 
                 {filteredJobs.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-12 text-center text-muted-foreground">
+<<<<<<< HEAD
                       {hasActiveFilter ? "No applications match your filters" : "No applications yet"}
+=======
+                      {localJobs.length === 0 ? "No applications yet" : "No matching applications found"}
+>>>>>>> e9fc0f7 (feat: add search & filter to Job Tracker and fresher onboarding toggle)
                     </td>
                   </tr>
                 ) : (
