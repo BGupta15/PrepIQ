@@ -464,6 +464,22 @@ class CreateJobApplicationRequest(BaseModel):
     jobUrl: str
     status: JobStatus
 
+    @field_validator("companyName", "jobTitle")
+    @classmethod
+    def non_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("must not be empty or whitespace-only")
+        return stripped
+
+    @field_validator("jobUrl")
+    @classmethod
+    def valid_url(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped.startswith(("http://", "https://")):
+            raise ValueError("must be a valid HTTP or HTTPS URL")
+        return stripped
+
 
 class UpdateJobApplicationRequest(BaseModel):
     companyName: str | None = None
