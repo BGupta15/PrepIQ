@@ -17,7 +17,6 @@ import httpx
 from fastapi import (
     Depends,
     FastAPI,
-    Header,
     HTTPException,
     Query,
     Request,
@@ -25,7 +24,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     JSON,
