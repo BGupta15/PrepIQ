@@ -22,8 +22,18 @@ class PrepIQApiTestCase(unittest.TestCase):
     def setUpClass(cls) -> None:
         if TEST_DB_PATH.exists():
             TEST_DB_PATH.unlink()
+        
+        # Mock sentence-transformers to avoid downloading models from Hugging Face Hub
+        from backend.app import ml
+        class MockSentenceTransformer:
+            def encode(self, sentences, *args, **kwargs):
+                import numpy as np
+                return np.array([[1.0, 0.0], [1.0, 0.0]])
+        ml._sentence_transformer_model = MockSentenceTransformer()
+
         cls.client_cm = TestClient(app)
         cls.client = cls.client_cm.__enter__()
+
 
     @classmethod
     def tearDownClass(cls) -> None:
