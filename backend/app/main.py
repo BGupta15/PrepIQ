@@ -1239,6 +1239,7 @@ def require_current_user(
 
     return user
 
+
 def validate_payload_size(request: Request) -> None:
     if "content-length" in request.headers:
         length = int(request.headers["content-length"])
