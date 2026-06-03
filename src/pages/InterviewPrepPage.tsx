@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Fragment } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { BookOpen, Loader2, Search, Brain, Cpu, Upload, Trash2, ChevronDown } from "lucide-react";
@@ -431,7 +431,7 @@ export default function InterviewPrepPage({
                       {activeSession.gapAnalysis.map((g, idx) => {
                         const isExpanded = !!expandedGaps[idx];
                         return (
-                          <React.Fragment key={idx}>
+                          <Fragment key={idx}>
                             <tr
                               onClick={() => toggleGap(idx)}
                               className="border-b border-border/50 hover:bg-secondary/20 transition-colors group cursor-pointer"
@@ -491,7 +491,7 @@ export default function InterviewPrepPage({
                                 </td>
                               </tr>
                             )}
-                          </React.Fragment>
+                          </Fragment>
                         );
                       })}
                     </tbody>
