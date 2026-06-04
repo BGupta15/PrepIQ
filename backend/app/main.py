@@ -216,6 +216,7 @@ class JobApplicationTable(Base):
     linked_prep_session_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True
     )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -484,6 +485,7 @@ class JobApplication(BaseModel):
     nextAction: str
     nextActionDate: str
     linkedPrepSessionId: str | None
+    sortOrder: int
     createdAt: str
     updatedAt: str
 
@@ -525,6 +527,7 @@ class UpdateJobApplicationRequest(BaseModel):
     nextAction: str | None = None
     nextActionDate: str | None = None
     linkedPrepSessionId: str | None = None
+    sortOrder: int | None = None
 
 
 def user_from_table(user: UserTable) -> User:
@@ -606,6 +609,7 @@ def job_from_table(job: JobApplicationTable) -> JobApplication:
         nextAction=job.next_action,
         nextActionDate=job.next_action_date,
         linkedPrepSessionId=job.linked_prep_session_id,
+        sortOrder=job.sort_order,
         createdAt=job.created_at.isoformat(),
         updatedAt=job.updated_at.isoformat(),
     )
@@ -1274,6 +1278,15 @@ async def startup() -> None:
                 pass
 
             try:
+                conn.execute(
+                    text(
+                        "ALTER TABLE job_applications ADD COLUMN sort_order INTEGER DEFAULT 0"
+                    )
+                )
+            except Exception:
+                pass
+
+            try:
                 res = conn.execute(
                     text(
                         "SELECT COUNT(*) FROM mentor_chat_history WHERE session_id IS NULL"
@@ -1674,7 +1687,7 @@ def get_jobs(
     rows = db.execute(
         select(JobApplicationTable)
         .where(JobApplicationTable.user_id == user_id)
-        .order_by(JobApplicationTable.created_at.asc())
+        .order_by(JobApplicationTable.sort_order.asc(), JobApplicationTable.created_at.asc())
     ).scalars()
     return [job_from_table(row) for row in rows]
 
@@ -1691,6 +1704,11 @@ def create_job(
     db: Session = Depends(get_db),
 ) -> JobApplication:
     now = utc_now()
+    max_sort = db.execute(
+        select(func.max(JobApplicationTable.sort_order))
+        .where(JobApplicationTable.user_id == user_id)
+        .where(JobApplicationTable.status == payload.status)
+    ).scalar()
     row = JobApplicationTable(
         id=str(uuid4()),
         user_id=user_id,
@@ -1707,6 +1725,7 @@ def create_job(
         next_action="",
         next_action_date="",
         linked_prep_session_id=None,
+        sort_order=(max_sort or 0) + 1,
         created_at=now,
         updated_at=now,
     )
@@ -1747,6 +1766,7 @@ def update_job(
         "nextAction": "next_action",
         "nextActionDate": "next_action_date",
         "linkedPrepSessionId": "linked_prep_session_id",
+        "sortOrder": "sort_order",
     }
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(job, field_map[key], value)

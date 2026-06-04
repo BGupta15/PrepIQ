@@ -647,6 +647,14 @@ export default function JobTrackerPage({ jobs, sessions, onAddJob, onUpdateJob, 
     // If status changed due to drag, trigger API sync
     if (finalStatus !== originalJob.status) {
       void updateSelectedJobStatus(originalJob, finalStatus);
+    } else {
+      // Intra-column reorder: persist sort_order for all jobs in the column
+      const sorted = localJobs.filter((j) => j.status === originalJob.status);
+      await Promise.all(
+        sorted.map((j, i) =>
+          j.sortOrder !== i ? onUpdateJob(j.id, { sortOrder: i }) : Promise.resolve(j),
+        ),
+      );
     }
   };
 
