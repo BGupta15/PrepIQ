@@ -618,7 +618,10 @@ def stable_number(seed: str, minimum: int, maximum: int) -> int:
 
 
 async def call_openrouter_json(
-    system_prompt: str, user_prompt: str, client: httpx.AsyncClient | None = None
+    system_prompt: str,
+    user_prompt: str,
+    client: httpx.AsyncClient | None = None,
+    history_messages: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     if GEMINI_API_KEY:
         url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
@@ -643,13 +646,17 @@ async def call_openrouter_json(
         }
         provider_name = "OpenRouter"
 
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+    ]
+    if history_messages:
+        messages.extend(history_messages)
+    messages.append({"role": "user", "content": user_prompt})
+
     payload = {
         "model": model,
         "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        "messages": messages,
     }
 
     max_retries = 3
@@ -2209,11 +2216,13 @@ async def post_mentor_chat_message(
         f"{profile_info}\n"
         "ALWAYS return JSON with a single key 'reply' containing your answer."
     )
-    messages_for_llm = [{"role": m.role, "content": m.content} for m in history]
+    history_messages = [{"role": m.role, "content": m.content} for m in history[:-1]]
 
     try:
         response_dict = await call_openrouter_json(
-            system_prompt=system_prompt, user_prompt=json.dumps(messages_for_llm)
+            system_prompt=system_prompt,
+            user_prompt=payload.message,
+            history_messages=history_messages,
         )
         reply_content = response_dict.get(
             "reply", "I'm sorry, I couldn't formulate a proper reply."
@@ -2323,9 +2332,13 @@ async def post_anonymous_chat(
         "ALWAYS return JSON with a single key 'reply' containing your answer."
     )
 
+    history_messages = [{"role": m["role"], "content": m["content"]} for m in payload.messages[:-1]]
+
     try:
         response_dict = await call_openrouter_json(
-            system_prompt=system_prompt, user_prompt=json.dumps(payload.messages)
+            system_prompt=system_prompt,
+            user_prompt=payload.messages[-1]["content"],
+            history_messages=history_messages,
         )
         reply_content = response_dict.get(
             "reply", "I'm sorry, I couldn't formulate a proper reply."
