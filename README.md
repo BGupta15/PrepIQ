@@ -21,6 +21,41 @@
 
 ---
 
+## Table of Contents
+
+- [Live Links](#live-links)
+- [About](#about)
+  - [Key Features](#key-features)
+- [Preview](#preview)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Clone](#1-clone)
+  - [Environment Setup](#2-environment-setup)
+  - [Install Dependencies](#3-install-dependencies)
+  - [Run Locally](#4-run-locally)
+  - [How the API Proxy Works](#how-the-api-proxy-works)
+  - [Why VITE_API_BASE_URL Must Be Blank for Local Development](#why-vite_api_base_url-must-be-blank-for-local-development)
+  - [In Production (Vercel → Render)](#in-production-vercel--render)
+  - [Quick Reference](#quick-reference)
+  - [Docker (Optional)](#docker-optional)
+- [Environment Variables](#environment-variables)
+- [API Endpoints](#api-endpoints)
+  - [Auth](#auth)
+  - [Profile](#profile)
+  - [Interview Prep](#interview-prep)
+  - [Mock Interviews](#mock-interviews)
+  - [Job Tracker](#job-tracker)
+  - [ML / NLP](#ml--nlp)
+  - [System](#system)
+- [Project Structure](#project-structure)
+- [Contributing](#contributing)
+- [Deployment](#deployment)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+---
+
 ## 🌐 Live Links
 
 | Service | URL |
