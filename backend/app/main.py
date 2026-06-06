@@ -230,7 +230,22 @@ class MentorChatSessionTable(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
+class DailyActivityTable(Base):
+    __tablename__ = "daily_activities"
 
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    date: Mapped[str] = mapped_column(String(10), index=True)
+    activity_type: Mapped[str] = mapped_column(String(50))
+
+
+class UserBadgeTable(Base):
+    __tablename__ = "user_badges"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    badge_id: Mapped[str] = mapped_column(String(50))
+    unlocked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 class MentorChatHistoryTable(Base):
     __tablename__ = "mentor_chat_history"
 
@@ -613,6 +628,108 @@ def job_from_table(job: JobApplicationTable) -> JobApplication:
         updatedAt=job.updated_at.isoformat(),
     )
 
+# ---------------------------------------------------------------------------
+# Streak & Badge helpers
+# ---------------------------------------------------------------------------
+
+BADGES = [
+    {"id": "first_steps", "label": "First Steps", "condition": "first_activity"},
+    {"id": "week_warrior", "label": "Week Warrior", "condition": "streak_7"},
+    {"id": "monthly_master", "label": "Monthly Master", "condition": "streak_30"},
+    {"id": "iron_will", "label": "Iron Will", "condition": "streak_60"},
+    {"id": "scholar", "label": "Scholar", "condition": "prep_10"},
+    {"id": "interview_pro", "label": "Interview Pro", "condition": "mock_5"},
+    {"id": "job_hunter", "label": "Job Hunter", "condition": "jobs_10"},
+    {"id": "perfectionist", "label": "Perfectionist", "condition": "score_90"},
+    {"id": "night_owl", "label": "Night Owl", "condition": "late_10"},
+]
+
+
+def track_activity(user_id: str, activity_type: str, db: Session) -> None:
+    today = today_iso()
+    existing = db.execute(
+        select(DailyActivityTable).where(
+            DailyActivityTable.user_id == user_id,
+            DailyActivityTable.date == today,
+            DailyActivityTable.activity_type == activity_type,
+        )
+    ).scalar_one_or_none()
+    if not existing:
+        db.add(DailyActivityTable(
+            id=str(uuid4()),
+            user_id=user_id,
+            date=today,
+            activity_type=activity_type,
+        ))
+        db.commit()
+
+
+def check_and_unlock_badges(user_id: str, db: Session) -> list[str]:
+    from datetime import date as date_type
+
+    all_activities = db.execute(
+        select(DailyActivityTable).where(DailyActivityTable.user_id == user_id)
+    ).scalars().all()
+
+    already_unlocked = {
+        row.badge_id for row in db.execute(
+            select(UserBadgeTable).where(UserBadgeTable.user_id == user_id)
+        ).scalars().all()
+    }
+
+    dates_with_activity = sorted({a.date for a in all_activities})
+    prep_count = sum(1 for a in all_activities if a.activity_type == "prep_session")
+    mock_count = sum(1 for a in all_activities if a.activity_type == "mock_interview")
+    job_count = sum(1 for a in all_activities if a.activity_type == "job_tracker")
+    late_count = sum(
+        1 for a in all_activities
+        if a.activity_type in ("prep_session", "mock_interview")
+        and utc_now().replace(hour=int(a.date[-2:]) if False else 0).hour >= 21
+    )
+
+    # compute current streak
+    streak = 0
+    if dates_with_activity:
+        today = today_iso()
+        check = today
+        for d in reversed(dates_with_activity):
+            if d == check:
+                streak += 1
+                prev = (date_type.fromisoformat(check) - timedelta(days=1)).isoformat()
+                check = prev
+            elif d < check:
+                break
+
+    newly_unlocked: list[str] = []
+    now = utc_now()
+
+    def unlock(badge_id: str) -> None:
+        if badge_id not in already_unlocked:
+            db.add(UserBadgeTable(
+                id=str(uuid4()),
+                user_id=user_id,
+                badge_id=badge_id,
+                unlocked_at=now,
+            ))
+            newly_unlocked.append(badge_id)
+
+    if dates_with_activity:
+        unlock("first_steps")
+    if streak >= 7:
+        unlock("week_warrior")
+    if streak >= 30:
+        unlock("monthly_master")
+    if streak >= 60:
+        unlock("iron_will")
+    if prep_count >= 10:
+        unlock("scholar")
+    if mock_count >= 5:
+        unlock("interview_pro")
+    if job_count >= 10:
+        unlock("job_hunter")
+
+    db.commit()
+    return newly_unlocked
 
 def stable_number(seed: str, minimum: int, maximum: int) -> int:
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
@@ -1584,6 +1701,7 @@ async def create_session(
     )
     db.add(row)
     db.commit()
+    track_activity(user_id, "prep_session", db)
     return session_from_table(row)
 
 
@@ -1698,6 +1816,7 @@ async def create_mock_attempt(
     )
     db.add(row)
     db.commit()
+    track_activity(user_id, "mock_interview", db)
     return mock_from_table(row)
 
 
@@ -1754,6 +1873,7 @@ def create_job(
     )
     db.add(row)
     db.commit()
+    track_activity(user_id, "job_tracker", db)
     return job_from_table(row)
 
 
@@ -2393,3 +2513,94 @@ async def post_anonymous_chat(
         )
 
     return {"reply": reply_content}
+
+# ---------------------------------------------------------------------------
+# Streak & Badges endpoints
+# ---------------------------------------------------------------------------
+
+
+class StreakResponse(BaseModel):
+    currentStreak: int
+    longestStreak: int
+    todayActivityCount: int
+    badges: list[dict]
+    newlyUnlocked: list[str]
+
+
+@app.get("/api/users/{user_id}/streak", response_model=StreakResponse)
+def get_streak(
+    user_id: str,
+    _: UserTable = Depends(require_current_user),
+    db: Session = Depends(get_db),
+) -> StreakResponse:
+    from datetime import date as date_type
+
+    all_activities = db.execute(
+        select(DailyActivityTable).where(DailyActivityTable.user_id == user_id)
+    ).scalars().all()
+
+    dates_with_activity = sorted({a.date for a in all_activities})
+    today = today_iso()
+    today_count = sum(1 for a in all_activities if a.date == today)
+
+    # current streak
+    current_streak = 0
+    check = today
+    for d in reversed(dates_with_activity):
+        if d == check:
+            current_streak += 1
+            check = (date_type.fromisoformat(check) - timedelta(days=1)).isoformat()
+        elif d < check:
+            break
+
+    # grace period: if today has no activity, yesterday still counts
+    if today not in dates_with_activity and dates_with_activity:
+        yesterday = (date_type.fromisoformat(today) - timedelta(days=1)).isoformat()
+        check = yesterday
+        current_streak = 0
+        for d in reversed(dates_with_activity):
+            if d == check:
+                current_streak += 1
+                check = (date_type.fromisoformat(check) - timedelta(days=1)).isoformat()
+            elif d < check:
+                break
+
+    # longest streak
+    longest_streak = 0
+    run = 0
+    prev = None
+    for d in dates_with_activity:
+        if prev is None:
+            run = 1
+        else:
+            diff = (date_type.fromisoformat(d) - date_type.fromisoformat(prev)).days
+            if diff == 1:
+                run += 1
+            else:
+                run = 1
+        longest_streak = max(longest_streak, run)
+        prev = d
+
+    newly_unlocked = check_and_unlock_badges(user_id, db)
+
+    user_badges = db.execute(
+        select(UserBadgeTable).where(UserBadgeTable.user_id == user_id)
+    ).scalars().all()
+    unlocked_ids = {b.badge_id for b in user_badges}
+
+    badges_response = [
+        {
+            "id": b["id"],
+            "label": b["label"],
+            "unlocked": b["id"] in unlocked_ids,
+        }
+        for b in BADGES
+    ]
+
+    return StreakResponse(
+        currentStreak=current_streak,
+        longestStreak=longest_streak,
+        todayActivityCount=today_count,
+        badges=badges_response,
+        newlyUnlocked=newly_unlocked,
+    )
