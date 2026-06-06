@@ -183,7 +183,6 @@ export default function OnboardingPage({ user, profile, onSave }: OnboardingPage
   const [softSkills, setSoftSkills] = useState<string[]>([]);
   const [fears, setFears] = useState<string[]>([]);
   const [fearNotes, setFearNotes] = useState("");
-  const [isFresher, setIsFresher] = useState(false);
 
   useEffect(() => {
     if (!profile) {
@@ -243,12 +242,8 @@ export default function OnboardingPage({ user, profile, onSave }: OnboardingPage
         return null;
       }
       case 2: {
-<<<<<<< HEAD
         if (isFresher) return null; // freshers skip work validation
 
-=======
-        if (isFresher) return null;
->>>>>>> e9fc0f7 (feat: add search & filter to Job Tracker and fresher onboarding toggle)
         let filledCount = 0;
         const currentYear = new Date().getFullYear();
 
@@ -437,13 +432,18 @@ export default function OnboardingPage({ user, profile, onSave }: OnboardingPage
 
               {step === 2 && (
                 <>
-<<<<<<< HEAD
-                  {/* Fresher toggle (issue #61) */}
                   <div className="flex items-start gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20">
                     <Checkbox
                       id="is-fresher-toggle"
                       checked={isFresher}
-                      onCheckedChange={(checked) => setIsFresher(!!checked)}
+                      onCheckedChange={(checked) => {
+                        setIsFresher(!!checked);
+                        if (checked) {
+                          setWorkHistory([]);
+                        } else {
+                          setWorkHistory([emptyWorkEntry()]);
+                        }
+                      }}
                       className="mt-0.5"
                     />
                     <div>
@@ -459,25 +459,6 @@ export default function OnboardingPage({ user, profile, onSave }: OnboardingPage
                     </div>
                   </div>
 
-=======
-                  <div className="flex items-center gap-2 mb-4 bg-secondary/20 p-3 rounded-xl border border-border/50">
-                    <Checkbox
-                      id="fresher-toggle"
-                      checked={isFresher}
-                      onCheckedChange={(checked) => {
-                        setIsFresher(!!checked);
-                        if (checked) {
-                          setWorkHistory([]);
-                        } else {
-                          setWorkHistory([emptyWorkEntry()]);
-                        }
-                      }}
-                    />
-                    <Label htmlFor="fresher-toggle" className="cursor-pointer text-sm font-medium text-foreground">
-                      I am a fresher (No professional work experience)
-                    </Label>
-                  </div>
->>>>>>> e9fc0f7 (feat: add search & filter to Job Tracker and fresher onboarding toggle)
                   {!isFresher && (
                     <>
                       {workHistory.map((entry, idx) => (
