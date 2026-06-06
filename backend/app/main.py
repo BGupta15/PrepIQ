@@ -456,7 +456,7 @@ class CreateMockAttemptRequest(BaseModel):
     sessionId: str = ""
     question: str = Field(max_length=2000)
     userAnswer: str = Field(max_length=10000)
-    
+
 class PaginatedMockAttempts(BaseModel):
     items: list[MockAttempt]
     total: int
