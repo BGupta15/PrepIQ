@@ -21,21 +21,7 @@ export default defineConfig(({ mode }) => ({
   build: {
     rollupOptions: {
       output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) {
-            return undefined;
-          }
-          if (id.includes("recharts")) {
-            return "charts";
-          }
-          if (id.includes("@radix-ui")) {
-            return "radix";
-          }
-          if (id.includes("framer-motion")) {
-            return "motion";
-          }
-          return "vendor";
-        },
+        // Let Vite handle chunking automatically to avoid circular dependencies and runtime React undefined errors
       },
     },
   },
