@@ -1454,7 +1454,7 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> AuthRespons
     )
     return AuthResponse(user=user_from_table(user), token=token)
 
-@app.post("/api/auth/logout", status_code=204)
+@app.post("/api/auth/logout", status_code=204, response_class=Response)
 def logout(
     credentials: HTTPAuthorizationCredentials = Depends(
         HTTPBearer(description="JWT Bearer token")
