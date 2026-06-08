@@ -244,6 +244,16 @@ class MentorChatHistoryTable(Base):
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
+class TokenBlacklistTable(Base):
+        """Stores revoked token signatures so logged-out tokens cannot be reused."""
+
+        __tablename__ = "token_blacklist"
+
+        signature: Mapped[str] = mapped_column(String(64), primary_key=True)
+        expires_at: Mapped[datetime] = mapped_column(
+            DateTime(timezone=True), index=True
+        )
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -272,7 +282,7 @@ def encode_token(payload: dict[str, Any]) -> str:
     return f"{payload_b64}.{signature}"
 
 
-def decode_token(token: str) -> dict[str, Any]:
+def decode_token(token: str, db: Session | None = None) -> dict[str, Any]:
     try:
         payload_b64, signature = token.split(".", 1)
     except ValueError as exc:
@@ -296,6 +306,15 @@ def decode_token(token: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired"
         )
+
+    # Check the token blacklist (revoked on logout)
+    if db is not None:
+        blacklisted = db.get(TokenBlacklistTable, signature)
+        if blacklisted is not None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked"
+            )
+
     return payload
 
 
@@ -1230,7 +1249,7 @@ def require_current_user(
         )
 
     token = credentials.credentials
-    payload = decode_token(token)
+    payload = decode_token(token, db=db)
 
     token_user_id = payload.get("sub")
 
@@ -1305,6 +1324,14 @@ async def startup() -> None:
                     text(
                         "ALTER TABLE job_applications ADD COLUMN sort_order INTEGER DEFAULT 0"
                     )
+                )
+            except Exception:
+                pass
+
+            try:
+                conn.execute(
+                    text("DELETE FROM token_blacklist WHERE expires_at < :now"),
+                    {"now": utc_now()},
                 )
             except Exception:
                 pass
@@ -1427,6 +1454,46 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> AuthRespons
     )
     return AuthResponse(user=user_from_table(user), token=token)
 
+@app.post("/api/auth/logout", status_code=204)
+def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(
+        HTTPBearer(description="JWT Bearer token")
+    ),
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    Revoke the supplied token by storing its signature in the blacklist.
+    The token will be rejected by decode_token() for the remainder of its TTL.
+    """
+    token = credentials.credentials
+    try:
+        payload_b64, signature = token.split(".", 1)
+    except ValueError:
+        return  # Malformed token — nothing to blacklist
+
+    # Verify it was actually signed by us before blacklisting
+    expected = hmac.new(
+        APP_SECRET.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return  # Not our token — ignore
+
+    padding = "=" * (-len(payload_b64) % 4)
+    try:
+        payload = json.loads(
+            base64.urlsafe_b64decode(f"{payload_b64}{padding}".encode()).decode("utf-8")
+        )
+    except Exception:
+        return
+
+    expires_at = datetime.fromtimestamp(
+        payload.get("exp", int(utc_now().timestamp())), tz=timezone.utc
+    )
+
+    # Upsert: if the signature is already blacklisted, do nothing
+    if db.get(TokenBlacklistTable, signature) is None:
+        db.add(TokenBlacklistTable(signature=signature, expires_at=expires_at))
+        db.commit()
 
 @app.get("/api/auth/me", response_model=User)
 def me(current_user: UserTable = Depends(require_current_user)) -> User:
