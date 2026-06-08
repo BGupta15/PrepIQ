@@ -551,6 +551,6 @@ class PrepIQApiTestCase(unittest.TestCase):
         """Calling logout with no token should not crash the server."""
         resp = client.post("/api/auth/logout")
         # FastAPI returns 403 for missing Bearer credentials — not a 500
-        assert resp.status_code in (401, 403)       
+        assert resp.status_code in (401, 403)
 if __name__ == "__main__":
     unittest.main()
