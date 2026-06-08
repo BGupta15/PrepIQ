@@ -245,14 +245,14 @@ class MentorChatHistoryTable(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 class TokenBlacklistTable(Base):
-        """Stores revoked token signatures so logged-out tokens cannot be reused."""
+    """Stores revoked token signatures so logged-out tokens cannot be reused."""
 
-        __tablename__ = "token_blacklist"
+    __tablename__ = "token_blacklist"
 
-        signature: Mapped[str] = mapped_column(String(64), primary_key=True)
-        expires_at: Mapped[datetime] = mapped_column(
-            DateTime(timezone=True), index=True
-        )
+    signature: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
 
 
 def utc_now() -> datetime:
@@ -1454,13 +1454,13 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> AuthRespons
     )
     return AuthResponse(user=user_from_table(user), token=token)
 
-@app.post("/api/auth/logout", status_code=204, response_class=Response)
+@app.post("/api/auth/logout", status_code=200)
 def logout(
     credentials: HTTPAuthorizationCredentials = Depends(
         HTTPBearer(description="JWT Bearer token")
     ),
     db: Session = Depends(get_db),
-) -> None:
+) -> dict:
     """
     Revoke the supplied token by storing its signature in the blacklist.
     The token will be rejected by decode_token() for the remainder of its TTL.
@@ -1494,6 +1494,7 @@ def logout(
     if db.get(TokenBlacklistTable, signature) is None:
         db.add(TokenBlacklistTable(signature=signature, expires_at=expires_at))
         db.commit()
+    return {"status": "ok"}
 
 @app.get("/api/auth/me", response_model=User)
 def me(current_user: UserTable = Depends(require_current_user)) -> User:
