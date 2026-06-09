@@ -67,7 +67,13 @@ _LOCAL_ENVS = {"development", "dev", "test", "local"}
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
+if DATABASE_URL:
+    # Rewrite postgresql:// and postgres:// to use psycopg v3 (postgresql+psycopg://)
+    if DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+    elif DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+else:
     if APP_ENV not in _LOCAL_ENVS:
         raise RuntimeError(
             f"[{APP_ENV.upper()}] DATABASE_URL is missing. "
