@@ -187,6 +187,7 @@ class InterviewSessionTable(Base):
     roadmap: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     extracted_skills: Mapped[list[str]] = mapped_column(JSON, default=list)
     ml_match_score: Mapped[int] = mapped_column(Integer, default=0)
+    interview_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -404,6 +405,7 @@ class InterviewSession(BaseModel):
     userId: str
     jobTitle: str
     company: str
+    interviewDate: str | None = None
     jdText: str
     resumeText: str
     isEstimated: bool
@@ -421,6 +423,7 @@ class CreateInterviewSessionRequest(BaseModel):
     company: str
     jdText: str = Field(default="", max_length=15000)
     resumeText: str = Field(default="", max_length=8000)
+    interviewDate: str | None = None
 
     @field_validator("jobTitle", "company", mode="after")
     @classmethod
@@ -572,6 +575,7 @@ def session_from_table(session: InterviewSessionTable) -> InterviewSession:
         userId=session.user_id,
         jobTitle=session.job_title,
         company=session.company,
+        interviewDate=session.interview_date,
         jdText=session.jd_text,
         resumeText=session.resume_text,
         isEstimated=session.is_estimated,
@@ -626,6 +630,44 @@ def stable_number(seed: str, minimum: int, maximum: int) -> int:
     span = maximum - minimum + 1
     return minimum + (int(digest[:8], 16) % span)
 
+def calculate_days_remaining(
+    interview_date: str | None,
+) -> int | None:
+
+    if not interview_date:
+        return None
+
+    interview_dt = datetime.fromisoformat(interview_date).date()
+    today = utc_now().date()
+
+    if interview_dt < today:
+        raise HTTPException(
+            status_code=400,
+            detail="Interview date cannot be in the past"
+        )
+
+    return max(
+        1,
+        (interview_dt - today).days
+    )
+
+def get_roadmap_days(
+    days_remaining: int | None
+) -> int:
+
+    if days_remaining is None:
+        return 5
+
+    if days_remaining <= 2:
+        return 2
+
+    if days_remaining <= 5:
+        return 5
+
+    if days_remaining <= 14:
+        return min(days_remaining, 10)
+
+    return 10
 
 async def call_openrouter_json(
     system_prompt: str,
@@ -753,8 +795,12 @@ async def generate_session_payload(
     company: str,
     jd_text: str,
     resume_text: str,
+    days_remaining: int | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> tuple[list[GapItem], int, list[QuestionItem], list[RoadmapDay], bool]:
+    target_days = get_roadmap_days(
+            days_remaining
+        )
     try:
         response = await call_openrouter_json(
             system_prompt=(
@@ -767,7 +813,7 @@ async def generate_session_payload(
                 '"roadmap":[{"day":1,"focusArea":"string","tasks":["string"]}]}. '
                 "gapAnalysis must be an array with 3 to 5 items. "
                 "questionBank must be an array with 6 to 10 items. "
-                "roadmap must be an array with exactly 5 days."
+                f"roadmap must be an array with exactly {target_days} days."
             ),
             user_prompt=(
                 f"Job title: {job_title}\n"
@@ -839,6 +885,10 @@ async def generate_session_payload(
             for item in raw_roadmap
             if isinstance(item, dict)
         ]
+        if len(roadmap) != target_days:
+            raise ValueError(
+                "Incorrect roadmap length"
+            )
 
         if len(roadmap) >= 1 and len(question_bank) >= 1 and len(gap_analysis) >= 1:
             return gap_analysis, readiness, question_bank, roadmap, False
@@ -896,53 +946,36 @@ async def generate_session_payload(
             tip="Demonstrate triage, communication, and follow-through.",
         ),
     ]
-    roadmap = [
-        RoadmapDay(
-            day=1,
-            focusArea="Company Research",
-            tasks=[
-                f"Research {company}'s products",
-                "Study the team and stack",
-                "Read recent company updates",
-            ],
-        ),
-        RoadmapDay(
-            day=2,
-            focusArea="Technical Review",
-            tasks=[
-                "Review core concepts",
-                f"Practice {job_title}-specific problems",
-                "Refresh system design patterns",
-            ],
-        ),
-        RoadmapDay(
-            day=3,
-            focusArea="Behavioral Prep",
-            tasks=[
-                "Prepare STAR stories",
-                "Practice behavioral questions",
-                "Review achievements with metrics",
-            ],
-        ),
-        RoadmapDay(
-            day=4,
-            focusArea="Mock Interviews",
-            tasks=[
-                "Run 2 mock rounds",
-                "Review weak answers",
-                "Refine delivery and examples",
-            ],
-        ),
-        RoadmapDay(
-            day=5,
-            focusArea="Final Review",
-            tasks=[
-                "Review notes",
-                "Prepare questions to ask",
-                "Rest before the interview",
-            ],
-        ),
+
+    focus_areas = [
+        "Company Research",
+        "Technical Review",
+        "Behavioral Prep",
+        "Mock Interviews",
+        "Final Review",
+        "Advanced Practice",
+        "System Design",
+        "Leadership Stories",
+        "Full Simulation",
+        "Interview Readiness",
     ]
+
+    roadmap = []
+
+    for day in range(1, target_days + 1):
+        roadmap.append(
+            RoadmapDay(
+                day=day,
+                focusArea=focus_areas[
+                    min(day - 1, len(focus_areas)-1)
+                ],
+                tasks=[
+                    f"Complete {focus_areas[min(day - 1, len(focus_areas)-1)]}",
+                    "Review weak areas",
+                    "Take notes"
+                ]
+            )
+        )
     is_estimated = not resume_text.strip() and not jd_text.strip()
     return gap_analysis, readiness, question_bank, roadmap, is_estimated
 
@@ -1309,6 +1342,8 @@ async def startup() -> None:
             try:
                 conn.execute(
                     text(
+                        "ALTER TABLE interview_sessions "
+                        "ADD COLUMN interview_date VARCHAR(32)"
                         "ALTER TABLE job_applications ADD COLUMN sort_order INTEGER DEFAULT 0"
                     )
                 )
@@ -1555,6 +1590,9 @@ async def create_session(
     db: Session = Depends(get_db),
 ) -> InterviewSession:
     client = getattr(request.app.state, "httpx_client", None)
+    days_remaining = calculate_days_remaining(
+        payload.interviewDate
+    )
     (
         gap_analysis,
         readiness,
@@ -1566,6 +1604,7 @@ async def create_session(
         payload.company,
         payload.jdText,
         payload.resumeText,
+        days_remaining=days_remaining,
         client=client,
     )
 
@@ -1578,6 +1617,7 @@ async def create_session(
         user_id=user_id,
         job_title=payload.jobTitle,
         company=payload.company,
+        interview_date=payload.interviewDate,
         jd_text=payload.jdText,
         resume_text=payload.resumeText,
         is_estimated=is_estimated,
