@@ -524,7 +524,7 @@ class PrepIQApiTestCase(unittest.TestCase):
         )
         self.assertNotEqual(res.status_code, 422)
 
-    def test_logout_invalidates_token(client, db_session):
+    def test_logout_invalidates_token(client):
         """After logout, the same token must return 401 on any protected endpoint."""
         # Sign up and get a token
         signup_resp = client.post(
