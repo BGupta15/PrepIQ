@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { apiRequest, SESSION_KEY } from "@/lib/api";
+import { apiRequest, AUTH_EXPIRED_EVENT, SESSION_KEY } from "@/lib/api";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 
@@ -63,6 +63,7 @@ export interface InterviewSession {
   mlMatchScore: number;
   isEstimated: boolean;
   createdAt: string;
+  interviewDate?: string;
 }
 
 export interface GapItem {
@@ -132,6 +133,7 @@ export interface JobApplication {
   nextAction: string;
   nextActionDate: string;
   linkedPrepSessionId: string | null;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -141,6 +143,7 @@ export interface CreateInterviewSessionInput {
   company: string;
   jdText: string;
   resumeText: string;
+  interviewDate?: string;
 }
 
 export interface CreateMockAttemptInput {
@@ -191,6 +194,13 @@ export function useAuth() {
       return;
     }
 
+    const handleAuthExpired = () => {
+      setSessionState(null);
+      setSession(null);
+    };
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+
     apiRequest<User>("/api/auth/me")
       .then((user) => {
         if (!active) return;
@@ -209,6 +219,7 @@ export function useAuth() {
 
     return () => {
       active = false;
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
     };
   }, []);
 

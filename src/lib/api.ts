@@ -1,5 +1,6 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 export const SESSION_KEY = "prepiq_session";
+export const AUTH_EXPIRED_EVENT = "prepiq:auth-expired";
 
 interface SessionPayload {
   user: {
@@ -53,7 +54,9 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   if (!response.ok) {
     if (response.status === 401 && !path.includes("/api/auth/")) {
       localStorage.removeItem(SESSION_KEY);
-      window.location.href = "/login";
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+      }
     }
     throw new Error(await parseError(response));
   }

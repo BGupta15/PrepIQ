@@ -18,7 +18,6 @@ import httpx
 from fastapi import (
     Depends,
     FastAPI,
-    Header,
     HTTPException,
     Query,
     Request,
@@ -26,6 +25,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     JSON,
@@ -69,7 +69,13 @@ _LOCAL_ENVS = {"development", "dev", "test", "local"}
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
+if DATABASE_URL:
+    # Rewrite postgresql:// and postgres:// to use psycopg v3 (postgresql+psycopg://)
+    if DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+    elif DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+else:
     if APP_ENV not in _LOCAL_ENVS:
         raise RuntimeError(
             f"[{APP_ENV.upper()}] DATABASE_URL is missing. "
@@ -122,7 +128,8 @@ if RESEND_API_KEY:
 CORS_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
-        "CORS_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080"
+        "CORS_ORIGINS",
+        "http://localhost:8080,http://127.0.0.1:8080,https://prepiqfrontend.vercel.app",
     ).split(",")
     if origin.strip()
 ]
@@ -187,6 +194,7 @@ class InterviewSessionTable(Base):
     roadmap: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     extracted_skills: Mapped[list[str]] = mapped_column(JSON, default=list)
     ml_match_score: Mapped[int] = mapped_column(Integer, default=0)
+    interview_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -223,6 +231,7 @@ class JobApplicationTable(Base):
     linked_prep_session_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True
     )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -403,6 +412,7 @@ class InterviewSession(BaseModel):
     userId: str
     jobTitle: str
     company: str
+    interviewDate: str | None = None
     jdText: str
     resumeText: str
     isEstimated: bool
@@ -420,6 +430,7 @@ class CreateInterviewSessionRequest(BaseModel):
     company: str
     jdText: str = Field(default="", max_length=15000)
     resumeText: str = Field(default="", max_length=8000)
+    interviewDate: str | None = None
 
     @field_validator("jobTitle", "company", mode="after")
     @classmethod
@@ -461,9 +472,8 @@ class MockAttempt(BaseModel):
 
 class CreateMockAttemptRequest(BaseModel):
     sessionId: str = ""
-    question: str
-    userAnswer: str
-
+    question: str = Field(max_length=2000)
+    userAnswer: str = Field(max_length=10000)
 
 class PaginatedMockAttempts(BaseModel):
     items: list[MockAttempt]
@@ -491,6 +501,7 @@ class JobApplication(BaseModel):
     nextAction: str
     nextActionDate: str
     linkedPrepSessionId: str | None
+    sortOrder: int
     createdAt: str
     updatedAt: str
 
@@ -532,6 +543,7 @@ class UpdateJobApplicationRequest(BaseModel):
     nextAction: str | None = None
     nextActionDate: str | None = None
     linkedPrepSessionId: str | None = None
+    sortOrder: int | None = None
 
 
 def user_from_table(user: UserTable) -> User:
@@ -570,6 +582,7 @@ def session_from_table(session: InterviewSessionTable) -> InterviewSession:
         userId=session.user_id,
         jobTitle=session.job_title,
         company=session.company,
+        interviewDate=session.interview_date,
         jdText=session.jd_text,
         resumeText=session.resume_text,
         isEstimated=session.is_estimated,
@@ -613,6 +626,7 @@ def job_from_table(job: JobApplicationTable) -> JobApplication:
         nextAction=job.next_action,
         nextActionDate=job.next_action_date,
         linkedPrepSessionId=job.linked_prep_session_id,
+        sortOrder=job.sort_order,
         createdAt=job.created_at.isoformat(),
         updatedAt=job.updated_at.isoformat(),
     )
@@ -623,9 +637,50 @@ def stable_number(seed: str, minimum: int, maximum: int) -> int:
     span = maximum - minimum + 1
     return minimum + (int(digest[:8], 16) % span)
 
+def calculate_days_remaining(
+    interview_date: str | None,
+) -> int | None:
+
+    if not interview_date:
+        return None
+
+    interview_dt = datetime.fromisoformat(interview_date).date()
+    today = utc_now().date()
+
+    if interview_dt < today:
+        raise HTTPException(
+            status_code=400,
+            detail="Interview date cannot be in the past"
+        )
+
+    return max(
+        1,
+        (interview_dt - today).days
+    )
+
+def get_roadmap_days(
+    days_remaining: int | None
+) -> int:
+
+    if days_remaining is None:
+        return 5
+
+    if days_remaining <= 2:
+        return 2
+
+    if days_remaining <= 5:
+        return 5
+
+    if days_remaining <= 14:
+        return min(days_remaining, 10)
+
+    return 10
 
 async def call_openrouter_json(
-    system_prompt: str, user_prompt: str, client: httpx.AsyncClient | None = None
+    system_prompt: str,
+    user_prompt: str,
+    client: httpx.AsyncClient | None = None,
+    history_messages: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     if GEMINI_API_KEY:
         url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
@@ -650,13 +705,17 @@ async def call_openrouter_json(
         }
         provider_name = "OpenRouter"
 
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+    ]
+    if history_messages:
+        messages.extend(history_messages)
+    messages.append({"role": "user", "content": user_prompt})
+
     payload = {
         "model": model,
         "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        "messages": messages,
     }
 
     max_retries = 3
@@ -743,8 +802,12 @@ async def generate_session_payload(
     company: str,
     jd_text: str,
     resume_text: str,
+    days_remaining: int | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> tuple[list[GapItem], int, list[QuestionItem], list[RoadmapDay], bool]:
+    target_days = get_roadmap_days(
+            days_remaining
+        )
     try:
         response = await call_openrouter_json(
             system_prompt=(
@@ -757,7 +820,7 @@ async def generate_session_payload(
                 '"roadmap":[{"day":1,"focusArea":"string","tasks":["string"]}]}. '
                 "gapAnalysis must be an array with 3 to 5 items. "
                 "questionBank must be an array with 6 to 10 items. "
-                "roadmap must be an array with exactly 5 days."
+                f"roadmap must be an array with exactly {target_days} days."
             ),
             user_prompt=(
                 f"Job title: {job_title}\n"
@@ -829,6 +892,10 @@ async def generate_session_payload(
             for item in raw_roadmap
             if isinstance(item, dict)
         ]
+        if len(roadmap) != target_days:
+            raise ValueError(
+                "Incorrect roadmap length"
+            )
 
         if len(roadmap) >= 1 and len(question_bank) >= 1 and len(gap_analysis) >= 1:
             return gap_analysis, readiness, question_bank, roadmap, False
@@ -886,53 +953,36 @@ async def generate_session_payload(
             tip="Demonstrate triage, communication, and follow-through.",
         ),
     ]
-    roadmap = [
-        RoadmapDay(
-            day=1,
-            focusArea="Company Research",
-            tasks=[
-                f"Research {company}'s products",
-                "Study the team and stack",
-                "Read recent company updates",
-            ],
-        ),
-        RoadmapDay(
-            day=2,
-            focusArea="Technical Review",
-            tasks=[
-                "Review core concepts",
-                f"Practice {job_title}-specific problems",
-                "Refresh system design patterns",
-            ],
-        ),
-        RoadmapDay(
-            day=3,
-            focusArea="Behavioral Prep",
-            tasks=[
-                "Prepare STAR stories",
-                "Practice behavioral questions",
-                "Review achievements with metrics",
-            ],
-        ),
-        RoadmapDay(
-            day=4,
-            focusArea="Mock Interviews",
-            tasks=[
-                "Run 2 mock rounds",
-                "Review weak answers",
-                "Refine delivery and examples",
-            ],
-        ),
-        RoadmapDay(
-            day=5,
-            focusArea="Final Review",
-            tasks=[
-                "Review notes",
-                "Prepare questions to ask",
-                "Rest before the interview",
-            ],
-        ),
+
+    focus_areas = [
+        "Company Research",
+        "Technical Review",
+        "Behavioral Prep",
+        "Mock Interviews",
+        "Final Review",
+        "Advanced Practice",
+        "System Design",
+        "Leadership Stories",
+        "Full Simulation",
+        "Interview Readiness",
     ]
+
+    roadmap = []
+
+    for day in range(1, target_days + 1):
+        roadmap.append(
+            RoadmapDay(
+                day=day,
+                focusArea=focus_areas[
+                    min(day - 1, len(focus_areas)-1)
+                ],
+                tasks=[
+                    f"Complete {focus_areas[min(day - 1, len(focus_areas)-1)]}",
+                    "Review weak areas",
+                    "Take notes"
+                ]
+            )
+        )
     is_estimated = not resume_text.strip() and not jd_text.strip()
     return gap_analysis, readiness, question_bank, roadmap, is_estimated
 
@@ -1205,38 +1255,54 @@ async def evaluate_mock_attempt(
     )
 
 
+# Initialize HTTPBearer security scheme for Swagger UI
+security = HTTPBearer(
+    scheme_name="Bearer",
+    description="JWT Bearer token",
+    auto_error=False,
+)
+
+
 def require_current_user(
     user_id: str | None = None,
-    authorization: str | None = Header(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> UserTable:
-    if not authorization or not authorization.startswith("Bearer "):
+
+    if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authorization token",
         )
 
-    payload = decode_token(authorization.removeprefix("Bearer ").strip())
+    token = credentials.credentials
+    payload = decode_token(token)
+
     token_user_id = payload.get("sub")
+
     if user_id is not None and token_user_id != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden",
+        )
 
     user = db.get(UserTable, token_user_id)
+
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
         )
     return user
 
 
-def validate_payload_size(request: Request) -> None:
-    if "content-length" in request.headers:
-        length = int(request.headers["content-length"])
-        if length > 5242880:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="Request entity too large",
-            )
+async def validate_payload_size(request: Request) -> None:
+    body = await request.body()
+    if len(body) > 5242880:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Request entity too large",
+        )
 
 class ContactRequest(BaseModel):
     name: str
@@ -1279,6 +1345,17 @@ async def startup() -> None:
                 conn.execute(
                     text(
                         "ALTER TABLE mentor_chat_history ADD COLUMN session_id VARCHAR(36)"
+                    )
+                )
+            except Exception:
+                pass
+
+            try:
+                conn.execute(
+                    text(
+                        "ALTER TABLE interview_sessions "
+                        "ADD COLUMN interview_date VARCHAR(32)"
+                        "ALTER TABLE job_applications ADD COLUMN sort_order INTEGER DEFAULT 0"
                     )
                 )
             except Exception:
@@ -1568,6 +1645,9 @@ async def create_session(
     db: Session = Depends(get_db),
 ) -> InterviewSession:
     client = getattr(request.app.state, "httpx_client", None)
+    days_remaining = calculate_days_remaining(
+        payload.interviewDate
+    )
     (
         gap_analysis,
         readiness,
@@ -1579,6 +1659,7 @@ async def create_session(
         payload.company,
         payload.jdText,
         payload.resumeText,
+        days_remaining=days_remaining,
         client=client,
     )
 
@@ -1591,6 +1672,7 @@ async def create_session(
         user_id=user_id,
         job_title=payload.jobTitle,
         company=payload.company,
+        interview_date=payload.interviewDate,
         jd_text=payload.jdText,
         resume_text=payload.resumeText,
         is_estimated=is_estimated,
@@ -1682,6 +1764,7 @@ def get_mock_attempts(
     "/api/users/{user_id}/mocks",
     response_model=MockAttempt,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(validate_payload_size)],
 )
 async def create_mock_attempt(
     user_id: str,
@@ -1729,7 +1812,7 @@ def get_jobs(
     rows = db.execute(
         select(JobApplicationTable)
         .where(JobApplicationTable.user_id == user_id)
-        .order_by(JobApplicationTable.created_at.asc())
+        .order_by(JobApplicationTable.sort_order.asc(), JobApplicationTable.created_at.asc())
     ).scalars()
     return [job_from_table(row) for row in rows]
 
@@ -1746,6 +1829,11 @@ def create_job(
     db: Session = Depends(get_db),
 ) -> JobApplication:
     now = utc_now()
+    max_sort = db.execute(
+        select(func.max(JobApplicationTable.sort_order))
+        .where(JobApplicationTable.user_id == user_id)
+        .where(JobApplicationTable.status == payload.status)
+    ).scalar()
     row = JobApplicationTable(
         id=str(uuid4()),
         user_id=user_id,
@@ -1762,6 +1850,7 @@ def create_job(
         next_action="",
         next_action_date="",
         linked_prep_session_id=None,
+        sort_order=(max_sort or 0) + 1,
         created_at=now,
         updated_at=now,
     )
@@ -1802,6 +1891,7 @@ def update_job(
         "nextAction": "next_action",
         "nextActionDate": "next_action_date",
         "linkedPrepSessionId": "linked_prep_session_id",
+        "sortOrder": "sort_order",
     }
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(job, field_map[key], value)
@@ -1864,6 +1954,7 @@ class GenerateQuestionResponse(BaseModel):
 @app.post(
     "/api/users/{user_id}/mock/generate-question",
     response_model=GenerateQuestionResponse,
+    dependencies=[Depends(validate_payload_size)],
 )
 async def generate_mock_question(
     user_id: str,
@@ -2030,7 +2121,7 @@ class MentorChatMessage(BaseModel):
 
 
 class MentorChatRequest(BaseModel):
-    message: str
+    message: str = Field(max_length=4000)
 
 
 @app.get(
@@ -2177,7 +2268,10 @@ def get_mentor_chat_messages(
     ]
 
 
-@app.post("/api/users/{user_id}/mentor-chat/sessions/{session_id}/messages")
+@app.post(
+    "/api/users/{user_id}/mentor-chat/sessions/{session_id}/messages",
+    dependencies=[Depends(validate_payload_size)],
+)
 async def post_mentor_chat_message(
     user_id: str,
     session_id: str,
@@ -2264,11 +2358,13 @@ async def post_mentor_chat_message(
         f"{profile_info}\n"
         "ALWAYS return JSON with a single key 'reply' containing your answer."
     )
-    messages_for_llm = [{"role": m.role, "content": m.content} for m in history]
+    history_messages = [{"role": m.role, "content": m.content} for m in history[:-1]]
 
     try:
         response_dict = await call_openrouter_json(
-            system_prompt=system_prompt, user_prompt=json.dumps(messages_for_llm)
+            system_prompt=system_prompt,
+            user_prompt=payload.message,
+            history_messages=history_messages,
         )
         reply_content = response_dict.get(
             "reply", "I'm sorry, I couldn't formulate a proper reply."
@@ -2324,7 +2420,10 @@ class AnonymousChatRequest(BaseModel):
     messages: list[dict[str, str]]
 
 
-@app.post("/api/users/{user_id}/mentor-chat/anonymous")
+@app.post(
+    "/api/users/{user_id}/mentor-chat/anonymous",
+    dependencies=[Depends(validate_payload_size)],
+)
 async def post_anonymous_chat(
     user_id: str,
     payload: AnonymousChatRequest,
@@ -2378,9 +2477,13 @@ async def post_anonymous_chat(
         "ALWAYS return JSON with a single key 'reply' containing your answer."
     )
 
+    history_messages = [{"role": m["role"], "content": m["content"]} for m in payload.messages[:-1]]
+
     try:
         response_dict = await call_openrouter_json(
-            system_prompt=system_prompt, user_prompt=json.dumps(payload.messages)
+            system_prompt=system_prompt,
+            user_prompt=payload.messages[-1]["content"],
+            history_messages=history_messages,
         )
         reply_content = response_dict.get(
             "reply", "I'm sorry, I couldn't formulate a proper reply."
