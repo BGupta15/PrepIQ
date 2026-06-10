@@ -29,7 +29,7 @@ async function parseError(response: Response): Promise<string> {
     }
     // Handle array of validation errors from FastAPI
     if (Array.isArray(payload?.detail)) {
-      return payload.detail.map((err: any) => err.msg || JSON.stringify(err)).join(", ");
+      return payload.detail.map((err: { msg?: string }) => err.msg || JSON.stringify(err)).join(", ");
     }
   } catch {
     // Ignore parse failures and fall back to status text.

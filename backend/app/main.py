@@ -1393,13 +1393,13 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> AuthRespons
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Password must be at least 8 characters",
         )
-    
+
     # Enhanced password validation
     has_upper = any(c.isupper() for c in payload.password)
     has_lower = any(c.islower() for c in payload.password)
     has_digit = any(c.isdigit() for c in payload.password)
     has_special = any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in payload.password)
-    
+
     missing_requirements = []
     if not has_upper:
         missing_requirements.append("one uppercase letter")
@@ -1409,20 +1409,20 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> AuthRespons
         missing_requirements.append("one number")
     if not has_special:
         missing_requirements.append("one special character")
-    
+
     if missing_requirements:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Password must contain {', '.join(missing_requirements)}",
         )
-    
+
     # Validate email format
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", payload.email):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Invalid email format",
         )
-    
+
     # Validate name format (letters and spaces only)
     if not re.match(r"^[A-Za-z\s]+$", payload.name.strip()):
         raise HTTPException(
