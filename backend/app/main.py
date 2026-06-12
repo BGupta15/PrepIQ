@@ -230,6 +230,7 @@ class MentorChatSessionTable(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
+
 class DailyActivityTable(Base):
     __tablename__ = "daily_activities"
 
@@ -246,6 +247,8 @@ class UserBadgeTable(Base):
     user_id: Mapped[str] = mapped_column(String(36), index=True)
     badge_id: Mapped[str] = mapped_column(String(50))
     unlocked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class MentorChatHistoryTable(Base):
     __tablename__ = "mentor_chat_history"
 
@@ -473,6 +476,7 @@ class CreateMockAttemptRequest(BaseModel):
     question: str = Field(max_length=2000)
     userAnswer: str = Field(max_length=10000)
 
+
 class PaginatedMockAttempts(BaseModel):
     items: list[MockAttempt]
     total: int
@@ -628,6 +632,7 @@ def job_from_table(job: JobApplicationTable) -> JobApplication:
         updatedAt=job.updated_at.isoformat(),
     )
 
+
 # ---------------------------------------------------------------------------
 # Streak & Badge helpers
 # ---------------------------------------------------------------------------
@@ -655,26 +660,35 @@ def track_activity(user_id: str, activity_type: str, db: Session) -> None:
         )
     ).scalar_one_or_none()
     if not existing:
-        db.add(DailyActivityTable(
-            id=str(uuid4()),
-            user_id=user_id,
-            date=today,
-            activity_type=activity_type,
-        ))
+        db.add(
+            DailyActivityTable(
+                id=str(uuid4()),
+                user_id=user_id,
+                date=today,
+                activity_type=activity_type,
+            )
+        )
         db.commit()
 
 
 def check_and_unlock_badges(user_id: str, db: Session) -> list[str]:
     from datetime import date as date_type
 
-    all_activities = db.execute(
-        select(DailyActivityTable).where(DailyActivityTable.user_id == user_id)
-    ).scalars().all()
+    all_activities = (
+        db.execute(
+            select(DailyActivityTable).where(DailyActivityTable.user_id == user_id)
+        )
+        .scalars()
+        .all()
+    )
 
     already_unlocked = {
-        row.badge_id for row in db.execute(
+        row.badge_id
+        for row in db.execute(
             select(UserBadgeTable).where(UserBadgeTable.user_id == user_id)
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     }
 
     dates_with_activity = sorted({a.date for a in all_activities})
@@ -682,7 +696,8 @@ def check_and_unlock_badges(user_id: str, db: Session) -> list[str]:
     mock_count = sum(1 for a in all_activities if a.activity_type == "mock_interview")
     job_count = sum(1 for a in all_activities if a.activity_type == "job_tracker")
     late_count = sum(
-        1 for a in all_activities
+        1
+        for a in all_activities
         if a.activity_type in ("prep_session", "mock_interview")
         and utc_now().replace(hour=int(a.date[-2:]) if False else 0).hour >= 21
     )
@@ -705,12 +720,14 @@ def check_and_unlock_badges(user_id: str, db: Session) -> list[str]:
 
     def unlock(badge_id: str) -> None:
         if badge_id not in already_unlocked:
-            db.add(UserBadgeTable(
-                id=str(uuid4()),
-                user_id=user_id,
-                badge_id=badge_id,
-                unlocked_at=now,
-            ))
+            db.add(
+                UserBadgeTable(
+                    id=str(uuid4()),
+                    user_id=user_id,
+                    badge_id=badge_id,
+                    unlocked_at=now,
+                )
+            )
             newly_unlocked.append(badge_id)
 
     if dates_with_activity:
@@ -727,9 +744,11 @@ def check_and_unlock_badges(user_id: str, db: Session) -> list[str]:
         unlock("interview_pro")
     if job_count >= 10:
         unlock("job_hunter")
-
+    if late_count >= 10:
+        unlock("night_owl")
     db.commit()
     return newly_unlocked
+
 
 def stable_number(seed: str, minimum: int, maximum: int) -> int:
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
@@ -1829,7 +1848,9 @@ def get_jobs(
     rows = db.execute(
         select(JobApplicationTable)
         .where(JobApplicationTable.user_id == user_id)
-        .order_by(JobApplicationTable.sort_order.asc(), JobApplicationTable.created_at.asc())
+        .order_by(
+            JobApplicationTable.sort_order.asc(), JobApplicationTable.created_at.asc()
+        )
     ).scalars()
     return [job_from_table(row) for row in rows]
 
@@ -2495,7 +2516,9 @@ async def post_anonymous_chat(
         "ALWAYS return JSON with a single key 'reply' containing your answer."
     )
 
-    history_messages = [{"role": m["role"], "content": m["content"]} for m in payload.messages[:-1]]
+    history_messages = [
+        {"role": m["role"], "content": m["content"]} for m in payload.messages[:-1]
+    ]
 
     try:
         response_dict = await call_openrouter_json(
@@ -2513,6 +2536,7 @@ async def post_anonymous_chat(
         )
 
     return {"reply": reply_content}
+
 
 # ---------------------------------------------------------------------------
 # Streak & Badges endpoints
@@ -2535,9 +2559,13 @@ def get_streak(
 ) -> StreakResponse:
     from datetime import date as date_type
 
-    all_activities = db.execute(
-        select(DailyActivityTable).where(DailyActivityTable.user_id == user_id)
-    ).scalars().all()
+    all_activities = (
+        db.execute(
+            select(DailyActivityTable).where(DailyActivityTable.user_id == user_id)
+        )
+        .scalars()
+        .all()
+    )
 
     dates_with_activity = sorted({a.date for a in all_activities})
     today = today_iso()
@@ -2583,9 +2611,11 @@ def get_streak(
 
     newly_unlocked = check_and_unlock_badges(user_id, db)
 
-    user_badges = db.execute(
-        select(UserBadgeTable).where(UserBadgeTable.user_id == user_id)
-    ).scalars().all()
+    user_badges = (
+        db.execute(select(UserBadgeTable).where(UserBadgeTable.user_id == user_id))
+        .scalars()
+        .all()
+    )
     unlocked_ids = {b.badge_id for b in user_badges}
 
     badges_response = [
