@@ -1342,8 +1342,15 @@ async def startup() -> None:
             try:
                 conn.execute(
                     text(
-                        "ALTER TABLE interview_sessions "
-                        "ADD COLUMN interview_date VARCHAR(32)"
+                        "ALTER TABLE interview_sessions ADD COLUMN interview_date VARCHAR(32)"
+                    )
+                )
+            except Exception:
+                pass
+
+            try:
+                conn.execute(
+                    text(
                         "ALTER TABLE job_applications ADD COLUMN sort_order INTEGER DEFAULT 0"
                     )
                 )
@@ -1400,6 +1407,21 @@ async def shutdown() -> None:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/debug-db")
+def debug_db(db: Session = Depends(get_db)):
+    try:
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        schema = {}
+        for table in tables:
+            columns = inspector.get_columns(table)
+            schema[table] = [col["name"] for col in columns]
+        return {"status": "ok", "tables": schema}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
