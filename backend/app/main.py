@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import secrets
+import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import uuid4
@@ -1301,7 +1302,6 @@ async def validate_payload_size(request: Request) -> None:
 app = FastAPI(title="PrepIQ Backend", version="2.0.0")
 
 
-import traceback
 
 @app.exception_handler(Exception)
 async def debug_exception_handler(request: Request, exc: Exception):
