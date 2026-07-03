@@ -1643,7 +1643,10 @@ async def contact(payload: ContactRequest):
 
 
 @app.get("/api/debug-db")
-def debug_db(db: Session = Depends(get_db)):
+def debug_db(
+    db: Session = Depends(get_db),
+    user: UserTable = Depends(require_current_user),
+):
     try:
         from sqlalchemy import inspect
         inspector = inspect(engine)
