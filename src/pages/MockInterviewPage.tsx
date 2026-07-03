@@ -275,7 +275,7 @@ export default function MockInterviewPage({
     setIsTimerRunning(false);
     try {
       const attempt = await onAddAttempt({
-        sessionId: selectedSession !== "custom" ? selectedSession : "",
+        sessionId: selectedSession !== "custom" ? selectedSession : null,
         question,
         userAnswer: latestAnswerRef.current,
       });
