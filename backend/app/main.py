@@ -252,6 +252,7 @@ class DailyActivityTable(Base):
     user_id: Mapped[str] = mapped_column(String(36), index=True)
     date: Mapped[str] = mapped_column(String(10), index=True)
     activity_type: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class UserBadgeTable(Base):
@@ -694,6 +695,7 @@ def track_activity(user_id: str, activity_type: str, db: Session) -> None:
                 user_id=user_id,
                 date=today,
                 activity_type=activity_type,
+                created_at=utc_now(),
             )
         )
         db.commit()
@@ -727,7 +729,8 @@ def check_and_unlock_badges(user_id: str, db: Session) -> list[str]:
         1
         for a in all_activities
         if a.activity_type in ("prep_session", "mock_interview")
-        and utc_now().replace(hour=int(a.date[-2:]) if False else 0).hour >= 21
+        and a.created_at is not None
+        and a.created_at.hour >= 21
     )
 
     # compute current streak
@@ -1533,7 +1536,18 @@ async def startup() -> None:
         except Exception as e:
             logging.getLogger(__name__).info(f"Migration job_applications sort_order ignored: {e}")
 
-        # 5. interview_sessions Table is_estimated column
+        # 5. daily_activities Table created_at column
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE daily_activities ADD COLUMN created_at TIMESTAMP WITH TIME ZONE"
+                    )
+                )
+        except Exception as e:
+            logging.getLogger(__name__).info(f"Migration daily_activities created_at ignored: {e}")
+
+        # 6. interview_sessions Table is_estimated column
         try:
             with engine.begin() as conn:
                 conn.execute(
@@ -1544,7 +1558,7 @@ async def startup() -> None:
         except Exception as e:
             logging.getLogger(__name__).info(f"Migration interview_sessions is_estimated ignored: {e}")
 
-        # 6. mentor_chat_history data migration
+        # 7. mentor_chat_history data migration
         try:
             with engine.begin() as conn:
                 res = conn.execute(
