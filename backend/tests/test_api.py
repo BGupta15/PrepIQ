@@ -25,15 +25,17 @@ class PrepIQApiTestCase(unittest.TestCase):
 
         # Mock sentence-transformers to avoid downloading models from Hugging Face Hub
         from backend.app import ml
+
         class MockSentenceTransformer:
             def encode(self, sentences, *args, **kwargs):
                 import numpy as np
+
                 return np.array([[1.0, 0.0], [1.0, 0.0]])
+
         ml._sentence_transformer_model = MockSentenceTransformer()
 
         cls.client_cm = TestClient(app)
         cls.client = cls.client_cm.__enter__()
-
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -43,7 +45,7 @@ class PrepIQApiTestCase(unittest.TestCase):
         email = f"test-{uuid4().hex[:8]}@example.com"
         response = self.client.post(
             "/api/auth/signup",
-            json={"name": "Test User", "email": email, "password": "password123"},
+            json={"name": "Test User", "email": email, "password": "Password123!"},
         )
         self.assertEqual(response.status_code, 201, response.text)
         payload = response.json()
@@ -203,13 +205,13 @@ class PrepIQApiTestCase(unittest.TestCase):
         email = f"login-{uuid4().hex[:8]}@example.com"
         signup = self.client.post(
             "/api/auth/signup",
-            json={"name": "Login User", "email": email, "password": "password123"},
+            json={"name": "Login User", "email": email, "password": "Password123!"},
         )
         self.assertEqual(signup.status_code, 201, signup.text)
 
         login = self.client.post(
             "/api/auth/login",
-            json={"email": email, "password": "password123"},
+            json={"email": email, "password": "Password123!"},
         )
         self.assertEqual(login.status_code, 200, login.text)
         token = login.json()["token"]
@@ -230,12 +232,12 @@ class PrepIQApiTestCase(unittest.TestCase):
         email = f"wrongpw-{uuid4().hex[:8]}@example.com"
         self.client.post(
             "/api/auth/signup",
-            json={"name": "Wrong PW User", "email": email, "password": "password123"},
+            json={"name": "Wrong PW User", "email": email, "password": "Password123!"},
         )
 
         response = self.client.post(
             "/api/auth/login",
-            json={"email": email, "password": "wrongpassword"},
+            json={"email": email, "password": "WrongPassword123!"},
         )
 
         self.assertEqual(response.status_code, 401, response.text)
@@ -379,7 +381,12 @@ class PrepIQApiTestCase(unittest.TestCase):
 
         jobs = self.client.get(f"/api/users/{user_id}/jobs", headers=headers)
         self.assertEqual(jobs.status_code, 200, jobs.text)
-        self.assertEqual(jobs.json(), [])
+        jobs_payload = jobs.json()
+        self.assertEqual(jobs_payload["items"], [])
+        self.assertEqual(jobs_payload["total"], 0)
+        self.assertEqual(jobs_payload["page"], 1)
+        self.assertEqual(jobs_payload["limit"], 20)
+        self.assertEqual(jobs_payload["total_pages"], 0)
 
         delete_session = self.client.delete(
             f"/api/users/{user_id}/sessions/{session_payload['id']}",
@@ -389,7 +396,12 @@ class PrepIQApiTestCase(unittest.TestCase):
 
         sessions = self.client.get(f"/api/users/{user_id}/sessions", headers=headers)
         self.assertEqual(sessions.status_code, 200, sessions.text)
-        self.assertEqual(sessions.json(), [])
+        sessions_payload = sessions.json()
+        self.assertEqual(sessions_payload["items"], [])
+        self.assertEqual(sessions_payload["total"], 0)
+        self.assertEqual(sessions_payload["page"], 1)
+        self.assertEqual(sessions_payload["limit"], 20)
+        self.assertEqual(sessions_payload["total_pages"], 0)
 
         mocks_after_delete = self.client.get(
             f"/api/users/{user_id}/mocks", headers=headers
@@ -417,6 +429,44 @@ class PrepIQApiTestCase(unittest.TestCase):
         self.assertIn(
             "cannot be empty or whitespace-only", payload_job["detail"][0]["msg"]
         )
+
+    def test_update_job_validation_rejects_invalid_fields(self) -> None:
+        user_id, headers = self.create_account()
+
+        create_response = self.client.post(
+            f"/api/users/{user_id}/jobs",
+            headers=headers,
+            json={
+                "companyName": "PrepIQ",
+                "jobTitle": "Frontend Engineer",
+                "jobUrl": "https://example.com/jobs/123",
+                "status": "Applied",
+            },
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.text)
+        job_id = create_response.json()["id"]
+
+        invalid_cases = [
+            ("jobTitle", {"jobTitle": "   "}),
+            ("companyName", {"companyName": "   "}),
+            ("jobUrl", {"jobUrl": "not-a-url"}),
+        ]
+
+        for field_name, payload in invalid_cases:
+            response = self.client.patch(
+                f"/api/users/{user_id}/jobs/{job_id}",
+                headers=headers,
+                json=payload,
+            )
+            self.assertEqual(response.status_code, 422, response.text)
+            detail = response.json()["detail"]
+            self.assertTrue(
+                any(
+                    item.get("loc") and item["loc"][-1] == field_name
+                    for item in detail
+                ),
+                response.text,
+            )
 
         res_empty_company = self.client.post(
             f"/api/users/{user_id}/sessions",
@@ -523,6 +573,7 @@ class PrepIQApiTestCase(unittest.TestCase):
             },
         )
         self.assertNotEqual(res.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

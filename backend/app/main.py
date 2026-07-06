@@ -9,11 +9,14 @@ import logging
 import os
 import re
 import secrets
+import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
+import resend
 from fastapi import (
     Depends,
     FastAPI,
@@ -60,14 +63,19 @@ def load_local_env() -> None:
 
 
 load_local_env()
-
 # Environments where SQLite and insecure defaults are explicitly permitted.
 # Any value not in this set is treated as production-like and requires real config.
 _LOCAL_ENVS = {"development", "dev", "test", "local"}
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
+if DATABASE_URL:
+    # Rewrite postgresql:// and postgres:// to use psycopg v3 (postgresql+psycopg://)
+    if DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+    elif DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+else:
     if APP_ENV not in _LOCAL_ENVS:
         raise RuntimeError(
             f"[{APP_ENV.upper()}] DATABASE_URL is missing. "
@@ -111,6 +119,11 @@ OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "PrepIQ")
 OPENROUTER_TIMEOUT_SECONDS = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "30"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+CONTACT_EMAIL = os.getenv("CONTACT_EMAIL", "")
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
 
 CORS_ORIGINS = [
     origin.strip()
@@ -181,6 +194,7 @@ class InterviewSessionTable(Base):
     roadmap: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     extracted_skills: Mapped[list[str]] = mapped_column(JSON, default=list)
     ml_match_score: Mapped[int] = mapped_column(Integer, default=0)
+    interview_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -232,6 +246,25 @@ class MentorChatSessionTable(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DailyActivityTable(Base):
+    __tablename__ = "daily_activities"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    date: Mapped[str] = mapped_column(String(10), index=True)
+    activity_type: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserBadgeTable(Base):
+    __tablename__ = "user_badges"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    badge_id: Mapped[str] = mapped_column(String(50))
+    unlocked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class MentorChatHistoryTable(Base):
     __tablename__ = "mentor_chat_history"
 
@@ -243,6 +276,16 @@ class MentorChatHistoryTable(Base):
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+class TokenBlacklistTable(Base):
+    """Stores revoked token signatures so logged-out tokens cannot be reused."""
+
+    __tablename__ = "token_blacklist"
+
+    signature: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
 
 
 def utc_now() -> datetime:
@@ -272,7 +315,7 @@ def encode_token(payload: dict[str, Any]) -> str:
     return f"{payload_b64}.{signature}"
 
 
-def decode_token(token: str) -> dict[str, Any]:
+def decode_token(token: str, db: Session | None = None) -> dict[str, Any]:
     try:
         payload_b64, signature = token.split(".", 1)
     except ValueError as exc:
@@ -296,6 +339,15 @@ def decode_token(token: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired"
         )
+
+    # Check the token blacklist (revoked on logout)
+    if db is not None:
+        blacklisted = db.get(TokenBlacklistTable, signature)
+        if blacklisted is not None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked"
+            )
+
     return payload
 
 
@@ -308,6 +360,17 @@ def hash_password(password: str, salt: str | None = None) -> str:
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
+    # Backward-compatibility: hashes created by the old passlib/bcrypt era
+    # start with $2b$ or $2a$.  Try bcrypt verification if passlib is available.
+    if stored_hash.startswith(("$2b$", "$2a$")):
+        try:
+            from passlib.context import CryptContext  # type: ignore[import]
+            return CryptContext(schemes=["bcrypt"], deprecated="auto").verify(
+                password, stored_hash
+            )
+        except Exception:
+            return False
+    # Current format: "<salt>$<base64-pbkdf2-digest>"
     try:
         salt, _ = stored_hash.split("$", 1)
     except ValueError:
@@ -399,6 +462,7 @@ class InterviewSession(BaseModel):
     userId: str
     jobTitle: str
     company: str
+    interviewDate: str | None = None
     jdText: str
     resumeText: str
     isEstimated: bool
@@ -416,6 +480,7 @@ class CreateInterviewSessionRequest(BaseModel):
     company: str
     jdText: str = Field(default="", max_length=15000)
     resumeText: str = Field(default="", max_length=8000)
+    interviewDate: str | None = None
 
     @field_validator("jobTitle", "company", mode="after")
     @classmethod
@@ -456,15 +521,32 @@ class MockAttempt(BaseModel):
 
 
 class CreateMockAttemptRequest(BaseModel):
-    sessionId: str = ""
+    sessionId: str | None = None
     question: str = Field(max_length=2000)
     userAnswer: str = Field(max_length=10000)
+
 
 class PaginatedMockAttempts(BaseModel):
     items: list[MockAttempt]
     total: int
     limit: int
     offset: int
+
+
+class PaginatedInterviewSessions(BaseModel):
+    items: list[InterviewSession]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
+class PaginatedJobApplications(BaseModel):
+    items: list[JobApplication]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
 
 
 JobStatus = Literal["Applied", "Screening", "Interview", "Offer", "Rejected", "Ghosted"]
@@ -491,30 +573,37 @@ class JobApplication(BaseModel):
     updatedAt: str
 
 
-class CreateJobApplicationRequest(BaseModel):
-    companyName: str
-    jobTitle: str
-    jobUrl: str
-    status: JobStatus
-
-    @field_validator("companyName", "jobTitle")
+class JobApplicationBaseRequest(BaseModel):
+    @field_validator("companyName", "jobTitle", check_fields=False)
     @classmethod
-    def non_empty(cls, v: str) -> str:
+    def non_empty(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         stripped = v.strip()
         if not stripped:
             raise ValueError("must not be empty or whitespace-only")
         return stripped
 
-    @field_validator("jobUrl")
+    @field_validator("jobUrl", check_fields=False)
     @classmethod
-    def valid_url(cls, v: str) -> str:
+    def valid_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         stripped = v.strip()
-        if not stripped.startswith(("http://", "https://")):
+        parsed = urlparse(stripped)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("must be a valid HTTP or HTTPS URL")
         return stripped
 
 
-class UpdateJobApplicationRequest(BaseModel):
+class CreateJobApplicationRequest(JobApplicationBaseRequest):
+    companyName: str
+    jobTitle: str
+    jobUrl: str
+    status: JobStatus
+
+
+class UpdateJobApplicationRequest(JobApplicationBaseRequest):
     companyName: str | None = None
     jobTitle: str | None = None
     jobUrl: str | None = None
@@ -567,6 +656,7 @@ def session_from_table(session: InterviewSessionTable) -> InterviewSession:
         userId=session.user_id,
         jobTitle=session.job_title,
         company=session.company,
+        interviewDate=session.interview_date,
         jdText=session.jd_text,
         resumeText=session.resume_text,
         isEstimated=session.is_estimated,
@@ -616,11 +706,168 @@ def job_from_table(job: JobApplicationTable) -> JobApplication:
     )
 
 
+# ---------------------------------------------------------------------------
+# Streak & Badge helpers
+# ---------------------------------------------------------------------------
+
+BADGES = [
+    {"id": "first_steps", "label": "First Steps", "condition": "first_activity"},
+    {"id": "week_warrior", "label": "Week Warrior", "condition": "streak_7"},
+    {"id": "monthly_master", "label": "Monthly Master", "condition": "streak_30"},
+    {"id": "iron_will", "label": "Iron Will", "condition": "streak_60"},
+    {"id": "scholar", "label": "Scholar", "condition": "prep_10"},
+    {"id": "interview_pro", "label": "Interview Pro", "condition": "mock_5"},
+    {"id": "job_hunter", "label": "Job Hunter", "condition": "jobs_10"},
+    {"id": "perfectionist", "label": "Perfectionist", "condition": "score_90"},
+    {"id": "night_owl", "label": "Night Owl", "condition": "late_10"},
+]
+
+
+def track_activity(user_id: str, activity_type: str, db: Session) -> None:
+    today = today_iso()
+    existing = db.execute(
+        select(DailyActivityTable).where(
+            DailyActivityTable.user_id == user_id,
+            DailyActivityTable.date == today,
+            DailyActivityTable.activity_type == activity_type,
+        )
+    ).scalar_one_or_none()
+    if not existing:
+        db.add(
+            DailyActivityTable(
+                id=str(uuid4()),
+                user_id=user_id,
+                date=today,
+                activity_type=activity_type,
+                created_at=utc_now(),
+            )
+        )
+        db.commit()
+
+
+def check_and_unlock_badges(user_id: str, db: Session) -> list[str]:
+    from datetime import date as date_type
+
+    all_activities = (
+        db.execute(
+            select(DailyActivityTable).where(DailyActivityTable.user_id == user_id)
+        )
+        .scalars()
+        .all()
+    )
+
+    already_unlocked = {
+        row.badge_id
+        for row in db.execute(
+            select(UserBadgeTable).where(UserBadgeTable.user_id == user_id)
+        )
+        .scalars()
+        .all()
+    }
+
+    dates_with_activity = sorted({a.date for a in all_activities})
+    prep_count = sum(1 for a in all_activities if a.activity_type == "prep_session")
+    mock_count = sum(1 for a in all_activities if a.activity_type == "mock_interview")
+    job_count = sum(1 for a in all_activities if a.activity_type == "job_tracker")
+    late_count = sum(
+        1
+        for a in all_activities
+        if a.activity_type in ("prep_session", "mock_interview")
+        and a.created_at is not None
+        and a.created_at.hour >= 21
+    )
+
+    # compute current streak
+    streak = 0
+    if dates_with_activity:
+        today = today_iso()
+        check = today
+        for d in reversed(dates_with_activity):
+            if d == check:
+                streak += 1
+                prev = (date_type.fromisoformat(check) - timedelta(days=1)).isoformat()
+                check = prev
+            elif d < check:
+                break
+
+    newly_unlocked: list[str] = []
+    now = utc_now()
+
+    def unlock(badge_id: str) -> None:
+        if badge_id not in already_unlocked:
+            db.add(
+                UserBadgeTable(
+                    id=str(uuid4()),
+                    user_id=user_id,
+                    badge_id=badge_id,
+                    unlocked_at=now,
+                )
+            )
+            newly_unlocked.append(badge_id)
+
+    if dates_with_activity:
+        unlock("first_steps")
+    if streak >= 7:
+        unlock("week_warrior")
+    if streak >= 30:
+        unlock("monthly_master")
+    if streak >= 60:
+        unlock("iron_will")
+    if prep_count >= 10:
+        unlock("scholar")
+    if mock_count >= 5:
+        unlock("interview_pro")
+    if job_count >= 10:
+        unlock("job_hunter")
+    if late_count >= 10:
+        unlock("night_owl")
+    db.commit()
+    return newly_unlocked
+
+
 def stable_number(seed: str, minimum: int, maximum: int) -> int:
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
     span = maximum - minimum + 1
     return minimum + (int(digest[:8], 16) % span)
 
+def calculate_days_remaining(
+    interview_date: str | None,
+) -> int | None:
+
+    if not interview_date:
+        return None
+
+    interview_dt = datetime.fromisoformat(interview_date).date()
+    today = utc_now().date()
+
+    if interview_dt < today:
+        raise HTTPException(
+            status_code=400,
+            detail="Interview date cannot be in the past"
+        )
+
+    return max(
+        1,
+        (interview_dt - today).days
+    )
+
+def get_roadmap_days(
+    days_remaining: int | None
+) -> int:
+
+    if days_remaining is None:
+        return 5
+
+    if days_remaining <= 2:
+        return 2
+
+    if days_remaining <= 5:
+        return 5
+
+    if days_remaining <= 14:
+        return min(days_remaining, 10)
+
+    return 10
 
 async def call_openrouter_json(
     system_prompt: str,
@@ -748,8 +995,12 @@ async def generate_session_payload(
     company: str,
     jd_text: str,
     resume_text: str,
+    days_remaining: int | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> tuple[list[GapItem], int, list[QuestionItem], list[RoadmapDay], bool]:
+    target_days = get_roadmap_days(
+            days_remaining
+        )
     try:
         response = await call_openrouter_json(
             system_prompt=(
@@ -763,7 +1014,7 @@ async def generate_session_payload(
                 "gapAnalysis must be an array with 3 to 5 items. For each gapAnalysis item, "
                 "include 2-3 resource keywords (e.g., 'React', 'MDN', 'System Design', 'Python Docs'). "
                 "questionBank must be an array with 6 to 10 items. "
-                "roadmap must be an array with exactly 5 days."
+                f"roadmap must be an array with exactly {target_days} days."
             ),
             user_prompt=(
                 f"Job title: {job_title}\n"
@@ -838,6 +1089,10 @@ async def generate_session_payload(
             for item in raw_roadmap
             if isinstance(item, dict)
         ]
+        if len(roadmap) != target_days:
+            raise ValueError(
+                "Incorrect roadmap length"
+            )
 
         if len(roadmap) >= 1 and len(question_bank) >= 1 and len(gap_analysis) >= 1:
             return gap_analysis, readiness, question_bank, roadmap, False
@@ -923,112 +1178,48 @@ async def generate_session_payload(
             tip="Demonstrate triage, communication, and follow-through.",
         ),
     ]
-    roadmap = [
-        RoadmapDay(
-            day=1,
-            focusArea="Company Research",
-            tasks=[
-                f"Research {company}'s products",
-                "Study the team and stack",
-                "Read recent company updates",
-            ],
-        ),
-        RoadmapDay(
-            day=2,
-            focusArea="Technical Review",
-            tasks=[
-                "Review core concepts",
-                f"Practice {job_title}-specific problems",
-                "Refresh system design patterns",
-            ],
-        ),
-        RoadmapDay(
-            day=3,
-            focusArea="Behavioral Prep",
-            tasks=[
-                "Prepare STAR stories",
-                "Practice behavioral questions",
-                "Review achievements with metrics",
-            ],
-        ),
-        RoadmapDay(
-            day=4,
-            focusArea="Mock Interviews",
-            tasks=[
-                "Run 2 mock rounds",
-                "Review weak answers",
-                "Refine delivery and examples",
-            ],
-        ),
-        RoadmapDay(
-            day=5,
-            focusArea="Final Review",
-            tasks=[
-                "Review notes",
-                "Prepare questions to ask",
-                "Rest before the interview",
-            ],
-        ),
+
+    focus_areas = [
+        "Company Research",
+        "Technical Review",
+        "Behavioral Prep",
+        "Mock Interviews",
+        "Final Review",
+        "Advanced Practice",
+        "System Design",
+        "Leadership Stories",
+        "Full Simulation",
+        "Interview Readiness",
     ]
+
+    roadmap = []
+
+    for day in range(1, target_days + 1):
+        roadmap.append(
+            RoadmapDay(
+                day=day,
+                focusArea=focus_areas[
+                    min(day - 1, len(focus_areas)-1)
+                ],
+                tasks=[
+                    f"Complete {focus_areas[min(day - 1, len(focus_areas)-1)]}",
+                    "Review weak areas",
+                    "Take notes"
+                ]
+            )
+        )
     is_estimated = not resume_text.strip() and not jd_text.strip()
     return gap_analysis, readiness, question_bank, roadmap, is_estimated
 
 
 def _significant_tokens(text: str) -> set[str]:
     stopwords = {
-        "the",
-        "and",
-        "a",
-        "an",
-        "of",
-        "to",
-        "is",
-        "are",
-        "in",
-        "for",
-        "on",
-        "with",
-        "that",
-        "this",
-        "it",
-        "as",
-        "at",
-        "by",
-        "from",
-        "be",
-        "or",
-        "not",
-        "have",
-        "has",
-        "was",
-        "were",
-        "will",
-        "can",
-        "i",
-        "you",
-        "your",
-        "we",
-        "our",
-        "they",
-        "their",
-        "what",
-        "which",
-        "when",
-        "where",
-        "why",
-        "how",
-        "do",
-        "does",
-        "did",
-        "so",
-        "but",
-        "if",
-        "then",
-        "because",
-        "there",
-        "these",
-        "those",
-        "meaning",
+        "the", "and", "a", "an", "of", "to", "is", "are", "in", "for", "on",
+        "with", "that", "this", "it", "as", "at", "by", "from", "be", "or",
+        "not", "have", "has", "was", "were", "will", "can", "i", "you", "your",
+        "we", "our", "they", "their", "what", "which", "when", "where", "why",
+        "how", "do", "does", "did", "so", "but", "if", "then", "because",
+        "there", "these", "those", "meaning",
     }
     return {
         token.lower()
@@ -1038,33 +1229,11 @@ def _significant_tokens(text: str) -> set[str]:
 
 
 FALLBACK_TECHNICAL_TERMS = {
-    "model",
-    "data",
-    "training",
-    "test",
-    "accuracy",
-    "performance",
-    "generalize",
-    "generalization",
-    "variance",
-    "bias",
-    "overfit",
-    "overfitting",
-    "unseen",
-    "feature",
-    "dataset",
-    "classification",
-    "regression",
-    "optimization",
-    "neural",
-    "network",
-    "algorithm",
-    "prediction",
-    "validation",
-    "loss",
-    "error",
-    "regularization",
-    "parameter",
+    "model", "data", "training", "test", "accuracy", "performance", "generalize",
+    "generalization", "variance", "bias", "overfit", "overfitting", "unseen",
+    "feature", "dataset", "classification", "regression", "optimization", "neural",
+    "network", "algorithm", "prediction", "validation", "loss", "error",
+    "regularization", "parameter",
 }
 
 
@@ -1263,7 +1432,7 @@ def require_current_user(
         )
 
     token = credentials.credentials
-    payload = decode_token(token)
+    payload = decode_token(token, db=db)
 
     token_user_id = payload.get("sub")
 
@@ -1291,8 +1460,24 @@ async def validate_payload_size(request: Request) -> None:
             detail="Request entity too large",
         )
 
-
+class ContactRequest(BaseModel):
+    name: str
+    email: str
+    subject: str
+    message: str
 app = FastAPI(title="PrepIQ Backend", version="2.0.0")
+
+
+
+@app.exception_handler(Exception)
+async def debug_exception_handler(request: Request, exc: Exception):
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    logger.error(f"Unhandled exception: {tb}")
+    return Response(
+        content=f"Internal Server Error\n\nTraceback:\n{tb}",
+        media_type="text/plain",
+        status_code=500,
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -1314,35 +1499,85 @@ async def startup() -> None:
 
         from sqlalchemy import text
 
-        with engine.begin() as conn:
-            try:
+        # 1. users Table anonymous_mode column
+        try:
+            with engine.begin() as conn:
                 conn.execute(
                     text(
                         "ALTER TABLE users ADD COLUMN anonymous_mode BOOLEAN DEFAULT FALSE"
                     )
                 )
-            except Exception:
-                pass
+        except Exception as e:
+            logging.getLogger(__name__).info(f"Migration users anonymous_mode ignored: {e}")
 
-            try:
+        # 2. mentor_chat_history Table session_id column
+        try:
+            with engine.begin() as conn:
                 conn.execute(
                     text(
                         "ALTER TABLE mentor_chat_history ADD COLUMN session_id VARCHAR(36)"
                     )
                 )
-            except Exception:
-                pass
+        except Exception as e:
+            logging.getLogger(__name__).info(f"Migration mentor_chat_history session_id ignored: {e}")
 
-            try:
+        # 3. interview_sessions Table interview_date column
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE interview_sessions ADD COLUMN interview_date VARCHAR(32)"
+                    )
+                )
+        except Exception as e:
+            logging.getLogger(__name__).info(f"Migration interview_sessions interview_date ignored: {e}")
+
+        # 4. job_applications Table sort_order column
+        try:
+            with engine.begin() as conn:
                 conn.execute(
                     text(
                         "ALTER TABLE job_applications ADD COLUMN sort_order INTEGER DEFAULT 0"
                     )
                 )
-            except Exception:
-                pass
+        except Exception as e:
+            logging.getLogger(__name__).info(f"Migration job_applications sort_order ignored: {e}")
 
-            try:
+        # 5. daily_activities Table created_at column
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE daily_activities ADD COLUMN created_at TIMESTAMP WITH TIME ZONE"
+                    )
+                )
+        except Exception as e:
+            logging.getLogger(__name__).info(f"Migration daily_activities created_at ignored: {e}")
+
+        # 6. Token blacklist cleanup
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("DELETE FROM token_blacklist WHERE expires_at < :now"),
+                    {"now": utc_now()},
+                )
+        except Exception:
+            pass
+
+        # 7. interview_sessions Table is_estimated column
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE interview_sessions ADD COLUMN is_estimated BOOLEAN DEFAULT FALSE"
+                    )
+                )
+        except Exception as e:
+            logging.getLogger(__name__).info(f"Migration interview_sessions is_estimated ignored: {e}")
+
+        # 8. mentor_chat_history data migration
+        try:
+            with engine.begin() as conn:
                 res = conn.execute(
                     text(
                         "SELECT COUNT(*) FROM mentor_chat_history WHERE session_id IS NULL"
@@ -1375,8 +1610,8 @@ async def startup() -> None:
                             ),
                             {"sid": sid, "uid": uid},
                         )
-            except Exception as e:
-                logging.getLogger(__name__).warning(f"Migration error: {e}")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Migration error: {e}")
     except Exception:
         logging.getLogger(__name__).exception("Failed to create database tables")
         raise
@@ -1392,6 +1627,68 @@ async def shutdown() -> None:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+@app.post("/api/contact")
+async def contact(payload: ContactRequest):
+    try:
+        if not RESEND_API_KEY:
+            raise HTTPException(
+                status_code=500,
+                detail="RESEND_API_KEY is not configured"
+            )
+
+        if not CONTACT_EMAIL:
+            raise HTTPException(
+                status_code=500,
+                detail="CONTACT_EMAIL is not configured"
+            )
+
+        resend.Emails.send(
+            {
+                "from": "onboarding@resend.dev",
+                "to": [CONTACT_EMAIL],
+                "subject": f"PrepIQ Contact: {payload.subject}",
+                "reply_to": payload.email,
+                "html": f"""
+                <h2>New Contact Form Submission</h2>
+
+                <p><strong>Name:</strong> {payload.name}</p>
+                <p><strong>Email:</strong> {payload.email}</p>
+                <p><strong>Subject:</strong> {payload.subject}</p>
+
+                <p><strong>Message:</strong></p>
+                <p>{payload.message}</p>
+                """,
+            }
+        )
+
+        return {
+            "success": True,
+            "message": "Message sent successfully"
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to send email: {str(e)}"
+        )
+
+
+@app.get("/api/debug-db")
+def debug_db(
+    db: Session = Depends(get_db),
+    user: UserTable = Depends(require_current_user),
+):
+    try:
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        schema = {}
+        for table in tables:
+            columns = inspector.get_columns(table)
+            schema[table] = [col["name"] for col in columns]
+        return {"status": "ok", "tables": schema}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
@@ -1420,17 +1717,50 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
     "/api/auth/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED
 )
 def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> AuthResponse:
+    # Validate password strength
     if len(payload.password) < 8:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Password must be at least 8 characters",
         )
+
+    # Enhanced password validation
+    has_upper = any(c.isupper() for c in payload.password)
+    has_lower = any(c.islower() for c in payload.password)
+    has_digit = any(c.isdigit() for c in payload.password)
+    has_special = any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in payload.password)
+
+    missing_requirements = []
+    if not has_upper:
+        missing_requirements.append("one uppercase letter")
+    if not has_lower:
+        missing_requirements.append("one lowercase letter")
+    if not has_digit:
+        missing_requirements.append("one number")
+    if not has_special:
+        missing_requirements.append("one special character")
+
+    if missing_requirements:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Password must contain {', '.join(missing_requirements)}",
+        )
+
+    # Validate email format
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", payload.email):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Invalid email format",
         )
 
+    # Validate name format (letters and spaces only)
+    if not re.match(r"^[A-Za-z\s]+$", payload.name.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Name can only contain letters and spaces",
+        )
+
+    # Check if email already exists
     existing = db.execute(
         select(UserTable).where(UserTable.email == payload.email.lower())
     ).scalar_one_or_none()
@@ -1460,6 +1790,47 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> AuthRespons
     )
     return AuthResponse(user=user_from_table(user), token=token)
 
+@app.post("/api/auth/logout", status_code=200)
+def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(
+        HTTPBearer(description="JWT Bearer token")
+    ),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Revoke the supplied token by storing its signature in the blacklist.
+    The token will be rejected by decode_token() for the remainder of its TTL.
+    """
+    token = credentials.credentials
+    try:
+        payload_b64, signature = token.split(".", 1)
+    except ValueError:
+        return  # Malformed token — nothing to blacklist
+
+    # Verify it was actually signed by us before blacklisting
+    expected = hmac.new(
+        APP_SECRET.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return  # Not our token — ignore
+
+    padding = "=" * (-len(payload_b64) % 4)
+    try:
+        payload = json.loads(
+            base64.urlsafe_b64decode(f"{payload_b64}{padding}".encode()).decode("utf-8")
+        )
+    except Exception:
+        return
+
+    expires_at = datetime.fromtimestamp(
+        payload.get("exp", int(utc_now().timestamp())), tz=timezone.utc
+    )
+
+    # Upsert: if the signature is already blacklisted, do nothing
+    if db.get(TokenBlacklistTable, signature) is None:
+        db.add(TokenBlacklistTable(signature=signature, expires_at=expires_at))
+        db.commit()
+    return {"status": "ok"}
 
 @app.get("/api/auth/me", response_model=User)
 def me(current_user: UserTable = Depends(require_current_user)) -> User:
@@ -1534,18 +1905,33 @@ def save_profile(
     return profile
 
 
-@app.get("/api/users/{user_id}/sessions", response_model=list[InterviewSession])
+@app.get("/api/users/{user_id}/sessions", response_model=PaginatedInterviewSessions)
 def get_sessions(
     user_id: str,
+    page: int = Query(default=1, ge=1, description="Page number (1-based)"),
+    limit: int = Query(default=20, ge=1, le=100, description="Results per page (1-100)"),
     _: UserTable = Depends(require_current_user),
     db: Session = Depends(get_db),
-) -> list[InterviewSession]:
+) -> PaginatedInterviewSessions:
+    offset = (page - 1) * limit
+    total = db.execute(
+        select(func.count()).select_from(InterviewSessionTable)
+        .where(InterviewSessionTable.user_id == user_id)
+    ).scalar_one()
     rows = db.execute(
         select(InterviewSessionTable)
         .where(InterviewSessionTable.user_id == user_id)
         .order_by(InterviewSessionTable.created_at.asc())
-    ).scalars()
-    return [session_from_table(row) for row in rows]
+        .limit(limit)
+        .offset(offset)
+    ).scalars().all()
+    return PaginatedInterviewSessions(
+        items=[session_from_table(row) for row in rows],
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=(total + limit - 1) // limit,
+    )
 
 
 @app.get("/api/users/{user_id}/sessions/{session_id}", response_model=InterviewSession)
@@ -1582,6 +1968,9 @@ async def create_session(
     db: Session = Depends(get_db),
 ) -> InterviewSession:
     client = getattr(request.app.state, "httpx_client", None)
+    days_remaining = calculate_days_remaining(
+        payload.interviewDate
+    )
     (
         gap_analysis,
         readiness,
@@ -1593,6 +1982,7 @@ async def create_session(
         payload.company,
         payload.jdText,
         payload.resumeText,
+        days_remaining=days_remaining,
         client=client,
     )
 
@@ -1605,6 +1995,7 @@ async def create_session(
         user_id=user_id,
         job_title=payload.jobTitle,
         company=payload.company,
+        interview_date=payload.interviewDate,
         jd_text=payload.jdText,
         resume_text=payload.resumeText,
         is_estimated=is_estimated,
@@ -1618,6 +2009,7 @@ async def create_session(
     )
     db.add(row)
     db.commit()
+    track_activity(user_id, "prep_session", db)
     return session_from_table(row)
 
 
@@ -1722,7 +2114,7 @@ async def create_mock_attempt(
     )
     row = MockAttemptTable(
         id=str(uuid4()),
-        session_id=payload.sessionId,
+        session_id=payload.sessionId or "",
         user_id=user_id,
         question=payload.question,
         user_answer=payload.userAnswer,
@@ -1732,22 +2124,37 @@ async def create_mock_attempt(
     )
     db.add(row)
     db.commit()
+    track_activity(user_id, "mock_interview", db)
     return mock_from_table(row)
 
 
-@app.get("/api/users/{user_id}/jobs", response_model=list[JobApplication])
+@app.get("/api/users/{user_id}/jobs", response_model=PaginatedJobApplications)
 def get_jobs(
     user_id: str,
+    page: int = Query(default=1, ge=1, description="Page number (1-based)"),
+    limit: int = Query(default=20, ge=1, le=100, description="Results per page (1-100)"),
     _: UserTable = Depends(require_current_user),
     db: Session = Depends(get_db),
-) -> list[JobApplication]:
+) -> PaginatedJobApplications:
+    offset = (page - 1) * limit
+    total = db.execute(
+        select(func.count()).select_from(JobApplicationTable)
+        .where(JobApplicationTable.user_id == user_id)
+    ).scalar_one()
     rows = db.execute(
         select(JobApplicationTable)
         .where(JobApplicationTable.user_id == user_id)
-        .order_by(JobApplicationTable.sort_order.asc(), JobApplicationTable.created_at.asc())
-    ).scalars()
-    return [job_from_table(row) for row in rows]
-
+.order_by(JobApplicationTable.sort_order.asc(), JobApplicationTable.created_at.asc())
+        .limit(limit)
+        .offset(offset)
+    ).scalars().all()
+    return PaginatedJobApplications(
+        items=[job_from_table(row) for row in rows],
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=(total + limit - 1) // limit,
+    )
 
 @app.post(
     "/api/users/{user_id}/jobs",
@@ -1788,6 +2195,7 @@ def create_job(
     )
     db.add(row)
     db.commit()
+    track_activity(user_id, "job_tracker", db)
     return job_from_table(row)
 
 
@@ -2409,7 +2817,9 @@ async def post_anonymous_chat(
         "ALWAYS return JSON with a single key 'reply' containing your answer."
     )
 
-    history_messages = [{"role": m["role"], "content": m["content"]} for m in payload.messages[:-1]]
+    history_messages = [
+        {"role": m["role"], "content": m["content"]} for m in payload.messages[:-1]
+    ]
 
     try:
         response_dict = await call_openrouter_json(
@@ -2427,3 +2837,101 @@ async def post_anonymous_chat(
         )
 
     return {"reply": reply_content}
+
+
+# ---------------------------------------------------------------------------
+# Streak & Badges endpoints
+# ---------------------------------------------------------------------------
+
+
+class StreakResponse(BaseModel):
+    currentStreak: int
+    longestStreak: int
+    todayActivityCount: int
+    badges: list[dict]
+    newlyUnlocked: list[str]
+
+
+@app.get("/api/users/{user_id}/streak", response_model=StreakResponse)
+def get_streak(
+    user_id: str,
+    _: UserTable = Depends(require_current_user),
+    db: Session = Depends(get_db),
+) -> StreakResponse:
+    from datetime import date as date_type
+
+    all_activities = (
+        db.execute(
+            select(DailyActivityTable).where(DailyActivityTable.user_id == user_id)
+        )
+        .scalars()
+        .all()
+    )
+
+    dates_with_activity = sorted({a.date for a in all_activities})
+    today = today_iso()
+    today_count = sum(1 for a in all_activities if a.date == today)
+
+    # current streak
+    current_streak = 0
+    check = today
+    for d in reversed(dates_with_activity):
+        if d == check:
+            current_streak += 1
+            check = (date_type.fromisoformat(check) - timedelta(days=1)).isoformat()
+        elif d < check:
+            break
+
+    # grace period: if today has no activity, yesterday still counts
+    if today not in dates_with_activity and dates_with_activity:
+        yesterday = (date_type.fromisoformat(today) - timedelta(days=1)).isoformat()
+        check = yesterday
+        current_streak = 0
+        for d in reversed(dates_with_activity):
+            if d == check:
+                current_streak += 1
+                check = (date_type.fromisoformat(check) - timedelta(days=1)).isoformat()
+            elif d < check:
+                break
+
+    # longest streak
+    longest_streak = 0
+    run = 0
+    prev = None
+    for d in dates_with_activity:
+        if prev is None:
+            run = 1
+        else:
+            diff = (date_type.fromisoformat(d) - date_type.fromisoformat(prev)).days
+            if diff == 1:
+                run += 1
+            else:
+                run = 1
+        longest_streak = max(longest_streak, run)
+        prev = d
+
+    newly_unlocked = check_and_unlock_badges(user_id, db)
+
+    user_badges = (
+        db.execute(select(UserBadgeTable).where(UserBadgeTable.user_id == user_id))
+        .scalars()
+        .all()
+    )
+    unlocked_ids = {b.badge_id for b in user_badges}
+
+    badges_response = [
+        {
+            "id": b["id"],
+            "label": b["label"],
+            "unlocked": b["id"] in unlocked_ids,
+        }
+        for b in BADGES
+    ]
+
+    return StreakResponse(
+        currentStreak=current_streak,
+        longestStreak=longest_streak,
+        todayActivityCount=today_count,
+        badges=badges_response,
+        newlyUnlocked=newly_unlocked,
+    )

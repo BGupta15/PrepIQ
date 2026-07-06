@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -17,6 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatCard } from "@/components/StatCard";
 import { User, CareerProfile, InterviewSession, MockAttempt, JobApplication } from "@/lib/store";
+import { useStreak } from "@/hooks/use-streak";
+import { Flame } from "lucide-react";
 
 interface DashboardPageProps {
   user: User;
@@ -28,8 +30,9 @@ interface DashboardPageProps {
 
 const ONBOARDING_DISMISSED_KEY = "prepiq_onboarding_dismissed";
 
-export default function DashboardPage({ user, profile, sessions, mocks, jobs }: DashboardPageProps) {
+function DashboardPageComponent({ user, profile, sessions, mocks, jobs }: DashboardPageProps) {
   const navigate = useNavigate();
+  const { data: streakData } = useStreak(user.id);
 
   const [isDismissed, setIsDismissed] = useState(() => {
     if (typeof window !== "undefined") {
@@ -38,32 +41,36 @@ export default function DashboardPage({ user, profile, sessions, mocks, jobs }: 
     return false;
   });
 
-  const dismissOnboarding = () => {
+  const dismissOnboarding = useCallback(() => {
     setIsDismissed(true);
     if (typeof window !== "undefined") {
       localStorage.setItem(ONBOARDING_DISMISSED_KEY, "true");
     }
-  };
+  }, []);
 
-  const completionPercent = profile?.onboardingComplete ? 100 : 0;
-  const avgScore = mocks.length
-    ? Math.round(mocks.reduce((s, m) => s + m.aiScore, 0) / mocks.length)
-    : 0;
+  const { completionPercent, avgScore, steps, completedSteps, onboardingProgress, showOnboarding } = useMemo(() => {
+    const completionPercent = profile?.onboardingComplete ? 100 : 0;
+    const avgScore = mocks.length
+      ? Math.round(mocks.reduce((s, m) => s + m.aiScore, 0) / mocks.length)
+      : 0;
 
-  const steps = [
-    { id: 1, title: "Create your account", completed: true },
-    { id: 2, title: "Complete Career DNA profile", completed: !!profile?.onboardingComplete },
-    { id: 3, title: "Add your first job application", completed: jobs.length > 0 },
-    { id: 4, title: "Create your first prep session", completed: sessions.length > 0 },
-    { id: 5, title: "Complete your first mock interview", completed: mocks.length > 0 },
-  ];
+    const steps = [
+      { id: 1, title: "Create your account", completed: true },
+      { id: 2, title: "Complete Career DNA profile", completed: !!profile?.onboardingComplete },
+      { id: 3, title: "Add your first job application", completed: jobs.length > 0 },
+      { id: 4, title: "Create your first prep session", completed: sessions.length > 0 },
+      { id: 5, title: "Complete your first mock interview", completed: mocks.length > 0 },
+    ];
 
-  const completedSteps = steps.filter((s) => s.completed).length;
-  const onboardingProgress = (completedSteps / steps.length) * 100;
-  const showOnboarding = !isDismissed && completedSteps < steps.length;
+    const completedSteps = steps.filter((s) => s.completed).length;
+    const onboardingProgress = (completedSteps / steps.length) * 100;
+    const showOnboarding = !isDismissed && completedSteps < steps.length;
 
-  const recentSessions = sessions.slice(-3).reverse();
-  const recentJobs = jobs.slice(-3).reverse();
+    return { completionPercent, avgScore, steps, completedSteps, onboardingProgress, showOnboarding };
+  }, [profile?.onboardingComplete, mocks, jobs.length, sessions.length, isDismissed]);
+
+  const recentSessions = useMemo(() => sessions.slice(-3).reverse(), [sessions]);
+  const recentJobs = useMemo(() => jobs.slice(-3).reverse(), [jobs]);
 
   const statusColor: Record<string, string> = {
     Applied: "bg-primary/20 text-primary",
@@ -208,6 +215,34 @@ export default function DashboardPage({ user, profile, sessions, mocks, jobs }: 
         />
       </div>
 
+{/* Streak Widget */}
+{streakData && (
+  <motion.div
+    initial={{ opacity: 0, y: 10 }}
+    animate={{ opacity: 1, y: 0 }}
+    className="rounded-2xl bg-card border border-border p-5 shadow-card"
+  >
+    <div className="flex items-center gap-2 mb-4">
+      <Flame className="w-5 h-5 text-orange-500" />
+      <h2 className="text-lg font-semibold text-foreground">Your Streak</h2>
+    </div>
+    <div className="flex gap-6">
+      <div className="text-center">
+        <p className="text-3xl font-bold text-orange-500">{streakData.currentStreak}</p>
+        <p className="text-xs text-muted-foreground mt-1">Current Streak</p>
+      </div>
+      <div className="text-center">
+        <p className="text-3xl font-bold text-foreground">{streakData.longestStreak}</p>
+        <p className="text-xs text-muted-foreground mt-1">Longest Streak</p>
+      </div>
+      <div className="text-center">
+        <p className="text-3xl font-bold text-foreground">{streakData.todayActivityCount}</p>
+        <p className="text-xs text-muted-foreground mt-1">Today's Activities</p>
+      </div>
+    </div>
+  </motion.div>
+)}
+
       {/* Quick Actions */}
       <div className="flex flex-wrap gap-3">
         <Button onClick={() => navigate("/interview-prep")} className="gradient-primary text-primary-foreground">
@@ -288,3 +323,5 @@ export default function DashboardPage({ user, profile, sessions, mocks, jobs }: 
     </div>
   );
 }
+
+export default DashboardPageComponent;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { apiRequest, SESSION_KEY } from "@/lib/api";
+import { apiRequest, AUTH_EXPIRED_EVENT, SESSION_KEY } from "@/lib/api";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 
@@ -63,6 +63,7 @@ export interface InterviewSession {
   mlMatchScore: number;
   isEstimated: boolean;
   createdAt: string;
+  interviewDate?: string;
 }
 
 export interface GapItem {
@@ -138,11 +139,28 @@ export interface JobApplication {
   updatedAt: string;
 }
 
+export interface PaginatedJobApplications {
+  items: JobApplication[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+}
+
+export interface PaginatedInterviewSessions {
+  items: InterviewSession[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+}
+
 export interface CreateInterviewSessionInput {
   jobTitle: string;
   company: string;
   jdText: string;
   resumeText: string;
+  interviewDate?: string;
 }
 
 export interface CreateMockAttemptInput {
@@ -181,6 +199,14 @@ export function getMockAttemptItems(payload: MockAttempt[] | PaginatedMockAttemp
   return Array.isArray(payload) ? payload : payload.items;
 }
 
+export function getJobApplicationItems(payload: JobApplication[] | PaginatedJobApplications): JobApplication[] {
+  return Array.isArray(payload) ? payload : payload.items;
+}
+
+export function getInterviewSessionItems(payload: InterviewSession[] | PaginatedInterviewSessions): InterviewSession[] {
+  return Array.isArray(payload) ? payload : payload.items;
+}
+
 export function useAuth() {
   const [session, setSessionState] = useState<AuthSession | null>(() => getSession());
   const [hydrated, setHydrated] = useState(false);
@@ -192,6 +218,13 @@ export function useAuth() {
       setHydrated(true);
       return;
     }
+
+    const handleAuthExpired = () => {
+      setSessionState(null);
+      setSession(null);
+    };
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
 
     apiRequest<User>("/api/auth/me")
       .then((user) => {
@@ -211,6 +244,7 @@ export function useAuth() {
 
     return () => {
       active = false;
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
     };
   }, []);
 
@@ -242,7 +276,13 @@ export function useAuth() {
     }
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Revoke the token server-side before clearing it locally
+    try {
+      await apiRequest("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Even if the server call fails, we still clear the local session
+    }
     setSessionState(null);
     setSession(null);
   }, []);
@@ -294,7 +334,10 @@ export function useInterviewSessions(userId: string | undefined) {
   const queryClient = useQueryClient();
   const sessionsQuery = useQuery<InterviewSession[]>({
     queryKey: ["interviewSessions", userId],
-    queryFn: () => apiRequest<InterviewSession[]>(`/api/users/${userId}/sessions`),
+    queryFn: async () => {
+      const payload = await apiRequest<InterviewSession[] | PaginatedInterviewSessions>(`/api/users/${userId}/sessions`);
+      return getInterviewSessionItems(payload);
+    },
     enabled: !!userId,
   });
 
@@ -380,7 +423,10 @@ export function useJobApplications(userId: string | undefined) {
   const queryClient = useQueryClient();
   const jobsQuery = useQuery<JobApplication[]>({
     queryKey: ["jobApplications", userId],
-    queryFn: () => apiRequest<JobApplication[]>(`/api/users/${userId}/jobs`),
+    queryFn: async () => {
+      const payload = await apiRequest<JobApplication[] | PaginatedJobApplications>(`/api/users/${userId}/jobs`);
+      return getJobApplicationItems(payload);
+    },
     enabled: !!userId,
   });
 
@@ -437,4 +483,3 @@ export function useJobApplications(userId: string | undefined) {
   const jobs = jobsQuery.data ?? [];
   return { jobs, addJob, updateJob, deleteJob, jobsError: jobsQuery.error instanceof Error ? jobsQuery.error.message : null, jobsLoading: jobsQuery.isLoading };
 }
-

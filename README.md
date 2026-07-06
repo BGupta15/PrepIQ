@@ -21,6 +21,37 @@
 
 ---
 
+## Table of Contents
+
+- [Live Links](#-live-links)
+- [About](#-about)
+  - [Key Features](#-key-features)
+- [Preview](#-preview)
+- [Tech Stack](#-tech-stack)
+- [Getting Started](#-getting-started)
+  - [Prerequisites](#-prerequisites)
+  - [Clone](#1-clone)
+  - [Environment Setup](#2-environment-setup)
+  - [Install Dependencies](#3-install-dependencies)
+  - [Run Locally](#4-run-locally)
+  - [How the API Proxy Works](#how-the-api-proxy-works)
+- [Environment Variables](#-environment-variables)
+- [API Endpoints](#-api-endpoints)
+  - [Auth](#auth)
+  - [Profile](#profile)
+  - [Interview Prep](#interview-prep)
+  - [Mock Interviews](#mock-interviews)
+  - [Job Tracker](#job-tracker)
+  - [ML / NLP](#ml--nlp)
+  - [System](#system)
+- [Project Structure](#-project-structure)
+- [Contributing](#-contributing)
+- [Deployment](#-deployment)
+- [Roadmap](#%EF%B8%8F-roadmap)
+- [License](#license)
+
+---
+
 ## 🌐 Live Links
 
 | Service | URL |
@@ -121,6 +152,7 @@ For simple manual local development, use SQLite instead of the Docker-oriented P
 ```env
 DATABASE_URL=sqlite:///./backend/local.db
 APP_SECRET=any-long-random-string-only-for-local-dev
+CORS_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
 ```
 
 > ⚠️ Never commit a real `APP_SECRET`.
