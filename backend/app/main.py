@@ -499,7 +499,7 @@ class MockAttempt(BaseModel):
 
 
 class CreateMockAttemptRequest(BaseModel):
-    sessionId: str = ""
+    sessionId: str | None = None
     question: str = Field(max_length=2000)
     userAnswer: str = Field(max_length=10000)
 
@@ -2024,7 +2024,7 @@ async def create_mock_attempt(
     )
     row = MockAttemptTable(
         id=str(uuid4()),
-        session_id=payload.sessionId,
+        session_id=payload.sessionId or "",
         user_id=user_id,
         question=payload.question,
         user_answer=payload.userAnswer,
