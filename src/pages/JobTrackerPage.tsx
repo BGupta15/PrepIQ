@@ -419,6 +419,7 @@ export default function JobTrackerPage({ jobs, sessions, onAddJob, onUpdateJob, 
   };
 
   // Optimistic jobs state for DnD
+  const [jobRoleOpen, setJobRoleOpen] = useState(false);
   const [localJobs, setLocalJobs] = useState<JobApplication[]>(jobs);
   const localJobsRef = useRef(jobs);
   const [activeJob, setActiveJob] = useState<JobApplication | null>(null);
