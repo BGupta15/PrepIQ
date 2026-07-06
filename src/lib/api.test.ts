@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiRequest } from "@/lib/api";
+import { apiRequest, AUTH_EXPIRED_EVENT } from "@/lib/api";
 import { getMockAttemptItems, type MockAttempt, type PaginatedMockAttempts } from "@/lib/store";
 
 describe("apiRequest", () => {
@@ -52,6 +52,32 @@ describe("apiRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(apiRequest("/api/auth/login", { method: "POST" })).rejects.toThrow("Invalid credentials");
+  });
+
+  it("dispatches an auth expired event for protected 401 responses", async () => {
+    localStorage.setItem(
+      "prepiq_session",
+      JSON.stringify({
+        user: { id: "user-1", name: "Test User", email: "test@example.com" },
+        token: "sample-token",
+      }),
+    );
+
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Session expired" }), {
+        status: 401,
+        statusText: "Unauthorized",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(apiRequest("/api/users/me")).rejects.toThrow("Session expired");
+    expect(localStorage.getItem("prepiq_session")).toBeNull();
+    expect(dispatchSpy).toHaveBeenCalled();
+    expect(dispatchSpy.mock.calls[0][0]).toMatchObject({ type: AUTH_EXPIRED_EVENT });
   });
 });
 

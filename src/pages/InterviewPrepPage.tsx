@@ -48,6 +48,7 @@ export default function InterviewPrepPage({
   const [company, setCompany] = useState("");
   const [jd, setJd] = useState("");
   const [resume, setResume] = useState("");
+  const [interviewDate, setInterviewDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<InterviewSession | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -145,6 +146,7 @@ export default function InterviewPrepPage({
         company,
         jdText: jd,
         resumeText: resume,
+        interviewDate: interviewDate || undefined,
       });
       setActiveSession(session);
       setShowForm(false);
@@ -224,7 +226,7 @@ export default function InterviewPrepPage({
                 </select>
               </div>
             )}
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-3 gap-4">
               <div>
                 <Label>Job Title</Label>
                 <Input value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} required className="mt-1 bg-secondary/50" placeholder="e.g. Senior Frontend Developer" />
@@ -232,6 +234,16 @@ export default function InterviewPrepPage({
               <div>
                 <Label>Company Name</Label>
                 <Input value={company} onChange={(e) => setCompany(e.target.value)} required className="mt-1 bg-secondary/50" placeholder="e.g. Google" />
+              </div>
+              <div>
+                <Label>Interview Date (Optional)</Label>
+                <Input
+                  type="date"
+                  value={interviewDate}
+                  min={new Date().toISOString().split("T")[0]}
+                  onChange={(e) => setInterviewDate(e.target.value)}
+                  className="mt-1 bg-secondary/50"
+                />
               </div>
             </div>
             <div>
@@ -567,7 +579,11 @@ export default function InterviewPrepPage({
               >
                 <div className="flex-1 cursor-pointer" onClick={() => setActiveSession(s)}>
                   <p className="font-medium text-foreground text-sm">{s.company} — {s.jobTitle}</p>
-                  <p className="text-xs text-muted-foreground">{new Date(s.createdAt).toLocaleDateString()}</p>
+                  {s.interviewDate && (
+                    <p className="text-xs text-primary">
+                      Interview: {new Date(s.interviewDate).toLocaleDateString()}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge className={s.readinessScore >= 70 ? "bg-success/20 text-success" : "bg-warning/20 text-warning"}>
