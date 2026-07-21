@@ -572,7 +572,7 @@ export default function MockInterviewPage({
               </div>
             </div>
             <Textarea
-              
+              id="answer"
               ref={answerRef}
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
