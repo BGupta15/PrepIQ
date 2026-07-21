@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   MessageSquare, Loader2, CheckCircle, XCircle,
-  ChevronDown, ChevronUp, Activity, Sparkles, RefreshCw, Timer, AlertTriangle,
+  ChevronDown, ChevronUp, Activity, Sparkles, RefreshCw, Timer, AlertTriangle,Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -205,6 +205,7 @@ export default function MockInterviewPage({
     timerLimitSeconds && timerLimitSeconds > 0
       ? Math.max(0, Math.min(100, (remainingSeconds / timerLimitSeconds) * 100))
       : 0;
+  const wordCount = answer.trim() ? answer.trim().split(/\s+/).length : 0;
 
   const applyTimerOption = (nextOption: TimerOption) => {
     setTimerOption(nextOption);
@@ -267,7 +268,23 @@ export default function MockInterviewPage({
     }
   };
   // ───────────────────────────────────────────────────────────────────────
+  const handleCopyModelAnswer = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
 
+      toast({
+        title: "Copied!",
+        description: "Model answer copied to clipboard.",
+      });
+    } catch {
+      toast({
+        title: "Copy failed",
+        description: "Unable to copy model answer.",
+        variant: "destructive",
+      });
+    }
+  };
+  
   const submitAnswer = useCallback(async (isTimeout = false) => {
     if (!question.trim()) return;
     if (!isTimeout && !answer.trim()) return;
@@ -581,6 +598,9 @@ export default function MockInterviewPage({
               className="mt-1 bg-secondary/50"
               required
             />
+            <p className="mt-2 text-xs text-muted-foreground text-right">
+              {wordCount} {wordCount === 1 ? "word" : "words"}
+            </p>
           </div>
           <Button
             type="submit"
@@ -633,8 +653,22 @@ export default function MockInterviewPage({
               {showModel ? "Hide" : "Show"} Model Answer
             </button>
             {showModel && (
-              <div className="mt-3 p-4 rounded-xl bg-secondary/30 border border-border text-sm text-muted-foreground">
-                {result.aiFeedback.modelAnswer}
+              <div className="mt-3 p-4 rounded-xl bg-secondary/30 border border-border">
+                <div className="flex justify-end mb-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleCopyModelAnswer(result.aiFeedback.modelAnswer)}
+                  >
+                    <Copy className="w-4 h-4 mr-2" />
+                    Copy
+                  </Button>
+                </div>
+
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                  {result.aiFeedback.modelAnswer}
+                </p>
               </div>
             )}
           </div>
