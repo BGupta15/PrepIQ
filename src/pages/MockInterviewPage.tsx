@@ -502,7 +502,7 @@ export default function MockInterviewPage({
           <div>
             <div className="space-y-2 mb-2">
               <div className="flex items-center justify-between gap-3">
-                <Label>Your Answer</Label>
+                <Label htmlFor="answer">Your Answer</Label>
                 <Select value={timerOption} onValueChange={(v) => applyTimerOption(v as TimerOption)}>
                   <SelectTrigger className="h-8 w-[140px] bg-secondary/50 text-xs">
                     <SelectValue />
@@ -572,6 +572,7 @@ export default function MockInterviewPage({
               </div>
             </div>
             <Textarea
+              
               ref={answerRef}
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}

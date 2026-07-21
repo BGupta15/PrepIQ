@@ -695,6 +695,7 @@ export default function InterviewPrepPage({
                   <Button
                     variant="ghost"
                     size="icon"
+                    aria-label={`Delete prep session for ${s.company}`}
                     className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                     onClick={(e) => { e.stopPropagation(); setSessionToDelete(s.id); }}
                   >

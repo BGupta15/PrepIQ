@@ -714,10 +714,10 @@ export default function JobTrackerPage({ jobs, sessions, onAddJob, onUpdateJob, 
             </Select>
 
             <div className="flex bg-secondary rounded-lg p-0.5 h-9 items-center">
-              <button onClick={() => setView("kanban")} className={`px-3 py-1.5 rounded-md text-sm transition-colors h-8 ${view === "kanban" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+              <button onClick={() => setView("kanban")} className={`px-3 py-1.5 rounded-md text-sm transition-colors h-8 ${view === "kanban" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`} aria-label="Kanban view" aria-pressed={view === "kanban"}>
                 <LayoutGrid className="w-4 h-4" />
               </button>
-              <button onClick={() => setView("table")} className={`px-3 py-1.5 rounded-md text-sm transition-colors h-8 ${view === "table" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+              <button onClick={() => setView("table")} className={`px-3 py-1.5 rounded-md text-sm transition-colors h-8 ${view === "table" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`} aria-label="Table view" aria-pressed={view === "table"}>
                 <TableIcon className="w-4 h-4" />
               </button>
             </div>

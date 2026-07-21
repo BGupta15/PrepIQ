@@ -466,9 +466,13 @@ export default function OnboardingPage({ user, profile, onSave }: OnboardingPage
       <div className="w-full max-w-2xl">
         <div className="mb-8">
           <h1 className="text-2xl font-bold gradient-text mb-2">Build Your Career DNA</h1>
-          <p className="text-muted-foreground text-sm">Step {step + 1} of {STEPS.length}: {STEPS[step]}</p>
+          <p className="text-muted-foreground text-sm" aria-live="polite" aria-atomic="true">Step {step + 1} of {STEPS.length}: {STEPS[step]}</p>
           <div className="w-full bg-secondary rounded-full h-2 mt-3">
             <div
+              role="progressbar"
+              aria-valuenow={progress}
+              aria-valuemin={0}
+              aria-valuemax={100}
               className="h-2 rounded-full gradient-primary transition-all duration-500"
               style={{ width: `${progress}%` }}
             />
